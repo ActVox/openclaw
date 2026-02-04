@@ -77,6 +77,30 @@ export function setLastActiveSessionKey(host: SettingsHost, next: string) {
   applySettings(host, { ...host.settings, lastActiveSessionKey: trimmed });
 }
 
+function isTopLevelWindow(): boolean {
+  try {
+    return window.top === window.self;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeGatewayUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return null;
+    }
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
 export function applySettingsFromUrl(host: SettingsHost) {
   if (!window.location.search) {
     return;
@@ -115,8 +139,8 @@ export function applySettingsFromUrl(host: SettingsHost) {
   }
 
   if (gatewayUrlRaw != null) {
-    const gatewayUrl = gatewayUrlRaw.trim();
-    if (gatewayUrl && gatewayUrl !== host.settings.gatewayUrl) {
+    const gatewayUrl = normalizeGatewayUrl(gatewayUrlRaw);
+    if (gatewayUrl && gatewayUrl !== host.settings.gatewayUrl && isTopLevelWindow()) {
       host.pendingGatewayUrl = gatewayUrl;
     }
     params.delete("gatewayUrl");
@@ -380,7 +404,7 @@ export function syncUrlWithTab(host: SettingsHost, tab: Tab, replace: boolean) {
   }
 }
 
-export function syncUrlWithSessionKey(host: SettingsHost, sessionKey: string, replace: boolean) {
+export function syncUrlWithSessionKey(sessionKey: string, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
