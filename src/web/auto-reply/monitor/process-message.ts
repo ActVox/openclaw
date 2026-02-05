@@ -27,6 +27,7 @@ import {
 } from "../../../config/sessions.js";
 import { logVerbose, shouldLogVerbose } from "../../../globals.js";
 import { readChannelAllowFromStore } from "../../../pairing/pairing-store.js";
+import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { jidToE164, normalizeE164 } from "../../../utils.js";
 import { newConnectionId } from "../../reconnect.js";
 import { formatError } from "../../session.js";
@@ -147,6 +148,30 @@ export async function processMessage(params: {
     previousTimestamp,
     envelope: envelopeOptions,
   });
+
+  // Invoke message_received hook for plugin integrations
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("message_received")) {
+    void hookRunner.runMessageReceived(
+      {
+        from: params.msg.from,
+        content: params.msg.body ?? "",
+        timestamp: params.msg.timestamp,
+        metadata: {
+          chatType: params.msg.chatType,
+          conversationId,
+          messageId: params.msg.id,
+          channel: "whatsapp",
+        },
+      },
+      {
+        channelId: "whatsapp",
+        accountId: params.msg.accountId,
+        conversationId,
+      },
+    );
+  }
+
   let shouldClearGroupHistory = false;
 
   if (params.msg.chatType === "group") {
