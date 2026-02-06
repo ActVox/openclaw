@@ -7,6 +7,14 @@ import process from "node:process";
 const args = process.argv.slice(2);
 const env = { ...process.env };
 const cwd = process.cwd();
+
+// Inject version from package.json so bundled builds resolve VERSION correctly.
+if (!env.OPENCLAW_BUNDLED_VERSION) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8"));
+    if (pkg.version) env.OPENCLAW_BUNDLED_VERSION = pkg.version;
+  } catch {}
+}
 const compiler = "tsdown";
 const compilerArgs = ["exec", compiler, "--no-clean"];
 
