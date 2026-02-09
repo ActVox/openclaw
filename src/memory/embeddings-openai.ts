@@ -29,7 +29,7 @@ export async function createOpenAiEmbeddingProvider(
 
   // text-embedding-3-{small,large} have 8192 token limit (~4 chars/token avg).
   // Truncate long inputs to avoid 400 errors.
-  const MAX_CHARS = 30000;
+  const MAX_CHARS = 24000;
   const truncate = (texts: string[]): string[] =>
     texts.map((t) => (t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t));
 
