@@ -27,6 +27,12 @@ export async function createOpenAiEmbeddingProvider(
   const client = await resolveOpenAiEmbeddingClient(options);
   const url = `${client.baseUrl.replace(/\/$/, "")}/embeddings`;
 
+  // text-embedding-3-{small,large} have 8192 token limit (~4 chars/token avg).
+  // Truncate long inputs to avoid 400 errors.
+  const MAX_CHARS = 30000;
+  const truncate = (texts: string[]): string[] =>
+    texts.map((t) => (t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t));
+
   const embed = async (input: string[]): Promise<number[][]> => {
     if (input.length === 0) {
       return [];
@@ -34,7 +40,7 @@ export async function createOpenAiEmbeddingProvider(
     const res = await fetch(url, {
       method: "POST",
       headers: client.headers,
-      body: JSON.stringify({ model: client.model, input }),
+      body: JSON.stringify({ model: client.model, input: truncate(input) }),
     });
     if (!res.ok) {
       const text = await res.text();
