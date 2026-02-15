@@ -220,6 +220,16 @@ export async function runNodeMain(params = {}) {
     platform: params.platform ?? process.platform,
   };
 
+  // Inject version from package.json so bundled builds resolve VERSION correctly.
+  if (!deps.env.OPENCLAW_BUNDLED_VERSION) {
+    try {
+      const pkg = JSON.parse(deps.fs.readFileSync(path.join(deps.cwd, "package.json"), "utf8"));
+      if (pkg.version) {
+        deps.env.OPENCLAW_BUNDLED_VERSION = pkg.version;
+      }
+    } catch {}
+  }
+
   deps.distRoot = path.join(deps.cwd, "dist");
   deps.distEntry = path.join(deps.distRoot, "/entry.js");
   deps.buildStampPath = path.join(deps.distRoot, ".buildstamp");
