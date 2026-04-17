@@ -1,12 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProcessSession } from "./bash-process-registry.js";
-import {
-  addSession,
-  getFinishedSession,
-  getSession,
-  resetProcessRegistryForTests,
-} from "./bash-process-registry.js";
-import { createProcessTool } from "./bash-tools.process.js";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { supervisorMock } = vi.hoisted(() => ({
   supervisorMock: {
@@ -30,38 +22,37 @@ vi.mock("../process/kill-tree.js", () => ({
   killProcessTree: (...args: unknown[]) => killProcessTreeMock(...args),
 }));
 
-function createBackgroundSession(id: string, pid?: number): ProcessSession {
-  return {
+let addSession: typeof import("./bash-process-registry.js").addSession;
+let getFinishedSession: typeof import("./bash-process-registry.js").getFinishedSession;
+let getSession: typeof import("./bash-process-registry.js").getSession;
+let resetProcessRegistryForTests: typeof import("./bash-process-registry.js").resetProcessRegistryForTests;
+let createProcessSessionFixture: typeof import("./bash-process-registry.test-helpers.js").createProcessSessionFixture;
+let createProcessTool: typeof import("./bash-tools.process.js").createProcessTool;
+
+function createBackgroundSession(id: string, pid?: number) {
+  return createProcessSessionFixture({
     id,
     command: "sleep 999",
-    startedAt: Date.now(),
-    cwd: "/tmp",
-    maxOutputChars: 10_000,
-    pendingMaxOutputChars: 30_000,
-    totalOutputChars: 0,
-    pendingStdout: [],
-    pendingStderr: [],
-    pendingStdoutChars: 0,
-    pendingStderrChars: 0,
-    aggregated: "",
-    tail: "",
-    pid,
-    exited: false,
-    exitCode: undefined,
-    exitSignal: undefined,
-    truncated: false,
     backgrounded: true,
-  };
+    ...(pid === undefined ? {} : { pid }),
+  });
 }
 
 describe("process tool supervisor cancellation", () => {
+  beforeAll(async () => {
+    ({ addSession, getFinishedSession, getSession, resetProcessRegistryForTests } =
+      await import("./bash-process-registry.js"));
+    ({ createProcessSessionFixture } = await import("./bash-process-registry.test-helpers.js"));
+    ({ createProcessTool } = await import("./bash-tools.process.js"));
+  });
+
   beforeEach(() => {
-    supervisorMock.spawn.mockReset();
-    supervisorMock.cancel.mockReset();
-    supervisorMock.cancelScope.mockReset();
-    supervisorMock.reconcileOrphans.mockReset();
-    supervisorMock.getRecord.mockReset();
-    killProcessTreeMock.mockReset();
+    supervisorMock.spawn.mockClear();
+    supervisorMock.cancel.mockClear();
+    supervisorMock.cancelScope.mockClear();
+    supervisorMock.reconcileOrphans.mockClear();
+    supervisorMock.getRecord.mockClear();
+    killProcessTreeMock.mockClear();
   });
 
   afterEach(() => {

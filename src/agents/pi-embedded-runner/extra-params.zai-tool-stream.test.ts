@@ -1,113 +1,168 @@
-import type { StreamFn } from "@mariozechner/pi-agent-core";
-import { describe, expect, it, vi } from "vitest";
-import { applyExtraParamsToAgent } from "./extra-params.js";
+import type { Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPiAiStreamSimpleMock } from "../../../test/helpers/agents/pi-ai-stream-simple-mock.js";
+import type { OpenClawConfig } from "../../config/config.js";
 
-// Mock streamSimple for testing
-vi.mock("@mariozechner/pi-ai", () => ({
-  streamSimple: vi.fn(() => ({
-    push: vi.fn(),
-    result: vi.fn(),
-  })),
-}));
+vi.mock("@mariozechner/pi-ai", async () =>
+  createPiAiStreamSimpleMock(() =>
+    vi.importActual<typeof import("@mariozechner/pi-ai")>("@mariozechner/pi-ai"),
+  ),
+);
 
-describe("extra-params: Z.AI tool_stream support", () => {
-  it("should inject tool_stream=true for zai provider by default", () => {
-    const mockStreamFn: StreamFn = vi.fn((model, context, options) => {
-      // Capture the payload that would be sent
-      options?.onPayload?.({ model: model.id, messages: [] });
-      return {
-        push: vi.fn(),
-        result: vi.fn().mockResolvedValue({
-          role: "assistant",
-          content: [{ type: "text", text: "ok" }],
-          stopReason: "stop",
-        }),
-      } as unknown as ReturnType<StreamFn>;
+let runExtraParamsCase: typeof import("./extra-params.test-support.js").runExtraParamsCase;
+let extraParamsTesting: typeof import("./extra-params.js").__testing;
+
+type ToolStreamCase = {
+  applyProvider: string;
+  applyModelId: string;
+  model: Model<"openai-completions">;
+  cfg?: OpenClawConfig;
+  options?: SimpleStreamOptions;
+};
+
+function runToolStreamCase(params: ToolStreamCase) {
+  return runExtraParamsCase({
+    applyModelId: params.applyModelId,
+    applyProvider: params.applyProvider,
+    cfg: params.cfg,
+    model: params.model,
+    options: params.options,
+    payload: { model: params.model.id, messages: [] },
+  }).payload as Record<string, unknown>;
+}
+
+describe("extra-params: provider tool_stream support", () => {
+  beforeEach(async () => {
+    ({ __testing: extraParamsTesting } = await import("./extra-params.js"));
+    ({ runExtraParamsCase } = await import("./extra-params.test-support.js"));
+    extraParamsTesting.setProviderRuntimeDepsForTest({
+      prepareProviderExtraParams: (params) => {
+        const extraParams = { ...params.context.extraParams };
+        if (
+          (params.provider === "zai" || params.provider === "xai") &&
+          extraParams.tool_stream !== false
+        ) {
+          extraParams.tool_stream = true;
+        }
+        return extraParams;
+      },
+      wrapProviderStreamFn: (params) => {
+        const extraParams = params.context.extraParams ?? {};
+        if (extraParams.tool_stream !== true) {
+          return undefined;
+        }
+        const inner = params.context.streamFn;
+        return (model, context, options) =>
+          inner?.(model, context, {
+            ...options,
+            onPayload(payload, payloadModel) {
+              if (payload && typeof payload === "object") {
+                (payload as Record<string, unknown>).tool_stream = true;
+              }
+              options?.onPayload?.(payload, payloadModel);
+            },
+          }) as ReturnType<NonNullable<typeof inner>>;
+      },
+    });
+  });
+
+  afterEach(() => {
+    extraParamsTesting.resetProviderRuntimeDepsForTest();
+  });
+
+  it("injects tool_stream=true for zai provider by default", () => {
+    const payload = runToolStreamCase({
+      applyProvider: "zai",
+      applyModelId: "glm-5",
+      model: {
+        api: "openai-completions",
+        provider: "zai",
+        id: "glm-5",
+      } as Model<"openai-completions">,
     });
 
-    const agent = { streamFn: mockStreamFn };
-    const cfg = {
-      agents: {
-        defaults: {},
-      },
-    };
-
-    applyExtraParamsToAgent(
-      agent,
-      cfg as unknown as Parameters<typeof applyExtraParamsToAgent>[1],
-      "zai",
-      "glm-5",
-    );
-
-    // The streamFn should be wrapped
-    expect(agent.streamFn).toBeDefined();
-    expect(agent.streamFn).not.toBe(mockStreamFn);
+    expect(payload.tool_stream).toBe(true);
   });
 
-  it("should not inject tool_stream for non-zai providers", () => {
-    const mockStreamFn: StreamFn = vi.fn(
-      () =>
-        ({
-          push: vi.fn(),
-          result: vi.fn().mockResolvedValue({
-            role: "assistant",
-            content: [{ type: "text", text: "ok" }],
-            stopReason: "stop",
-          }),
-        }) as unknown as ReturnType<StreamFn>,
-    );
+  it("injects tool_stream=true for xai provider by default", () => {
+    const payload = runToolStreamCase({
+      applyProvider: "xai",
+      applyModelId: "grok-4-1-fast-reasoning",
+      model: {
+        api: "openai-completions",
+        provider: "xai",
+        id: "grok-4-1-fast-reasoning",
+      } as Model<"openai-completions">,
+    });
 
-    const agent = { streamFn: mockStreamFn };
-    const cfg = {};
-
-    applyExtraParamsToAgent(
-      agent,
-      cfg as unknown as Parameters<typeof applyExtraParamsToAgent>[1],
-      "anthropic",
-      "claude-opus-4-6",
-    );
-
-    // Should remain unchanged (except for OpenAI wrapper)
-    expect(agent.streamFn).toBeDefined();
+    expect(payload.tool_stream).toBe(true);
   });
 
-  it("should allow disabling tool_stream via params", () => {
-    const mockStreamFn: StreamFn = vi.fn(
-      () =>
-        ({
-          push: vi.fn(),
-          result: vi.fn().mockResolvedValue({
-            role: "assistant",
-            content: [{ type: "text", text: "ok" }],
-            stopReason: "stop",
-          }),
-        }) as unknown as ReturnType<StreamFn>,
-    );
+  it("does not inject tool_stream for providers that do not need it", () => {
+    const payload = runToolStreamCase({
+      applyProvider: "openai",
+      applyModelId: "gpt-5",
+      model: {
+        api: "openai-completions",
+        provider: "openai",
+        id: "gpt-5",
+      } as Model<"openai-completions">,
+    });
 
-    const agent = { streamFn: mockStreamFn };
-    const cfg = {
-      agents: {
-        defaults: {
-          models: {
-            "zai/glm-5": {
-              params: {
-                tool_stream: false,
+    expect(payload).not.toHaveProperty("tool_stream");
+  });
+
+  it("allows disabling zai tool_stream via params", () => {
+    const payload = runToolStreamCase({
+      applyProvider: "zai",
+      applyModelId: "glm-5",
+      model: {
+        api: "openai-completions",
+        provider: "zai",
+        id: "glm-5",
+      } as Model<"openai-completions">,
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "zai/glm-5": {
+                params: {
+                  tool_stream: false,
+                },
               },
             },
           },
         },
       },
-    };
+    });
 
-    applyExtraParamsToAgent(
-      agent,
-      cfg as unknown as Parameters<typeof applyExtraParamsToAgent>[1],
-      "zai",
-      "glm-5",
-    );
+    expect(payload).not.toHaveProperty("tool_stream");
+  });
 
-    // The tool_stream wrapper should be applied but with enabled=false
-    // In this case, it should just return the underlying streamFn
-    expect(agent.streamFn).toBeDefined();
+  it("allows disabling xai tool_stream via params", () => {
+    const payload = runToolStreamCase({
+      applyProvider: "xai",
+      applyModelId: "grok-4-1-fast-reasoning",
+      model: {
+        api: "openai-completions",
+        provider: "xai",
+        id: "grok-4-1-fast-reasoning",
+      } as Model<"openai-completions">,
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "xai/grok-4-1-fast-reasoning": {
+                params: {
+                  tool_stream: false,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(payload).not.toHaveProperty("tool_stream");
   });
 });

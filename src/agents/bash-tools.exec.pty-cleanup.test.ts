@@ -1,6 +1,6 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { resetProcessRegistryForTests } from "./bash-process-registry";
-import { createExecTool } from "./bash-tools.exec";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+let createExecTool: typeof import("./bash-tools.exec.js").createExecTool;
+let resetProcessRegistryForTests: typeof import("./bash-process-registry.js").resetProcessRegistryForTests;
 
 const { ptySpawnMock } = vi.hoisted(() => ({
   ptySpawnMock: vi.fn(),
@@ -9,6 +9,15 @@ const { ptySpawnMock } = vi.hoisted(() => ({
 vi.mock("@lydell/node-pty", () => ({
   spawn: (...args: unknown[]) => ptySpawnMock(...args),
 }));
+
+beforeAll(async () => {
+  ({ createExecTool } = await import("./bash-tools.exec.js"));
+  ({ resetProcessRegistryForTests } = await import("./bash-process-registry.js"));
+});
+
+beforeEach(() => {
+  ptySpawnMock.mockReset();
+});
 
 afterEach(() => {
   resetProcessRegistryForTests();
@@ -33,7 +42,12 @@ test("exec disposes PTY listeners after normal exit", async () => {
     kill: vi.fn(),
   }));
 
-  const tool = createExecTool({ allowBackground: false });
+  const tool = createExecTool({
+    allowBackground: false,
+    host: "gateway",
+    security: "full",
+    ask: "off",
+  });
   const result = await tool.execute("toolcall", {
     command: "echo ok",
     pty: true,
@@ -47,24 +61,41 @@ test("exec disposes PTY listeners after normal exit", async () => {
 test("exec tears down PTY resources on timeout", async () => {
   const disposeData = vi.fn();
   const disposeExit = vi.fn();
-  const kill = vi.fn();
+  let exitListener: ((event: { exitCode: number; signal?: number }) => void) | undefined;
+  const kill = vi.fn(() => {
+    // Mirror real PTY behavior: process exits shortly after force-kill.
+    exitListener?.({ exitCode: 137, signal: 9 });
+  });
 
   ptySpawnMock.mockImplementation(() => ({
     pid: 0,
     write: vi.fn(),
     onData: () => ({ dispose: disposeData }),
-    onExit: () => ({ dispose: disposeExit }),
+    onExit: (listener: (event: { exitCode: number; signal?: number }) => void) => {
+      exitListener = listener;
+      return { dispose: disposeExit };
+    },
     kill,
   }));
 
-  const tool = createExecTool({ allowBackground: false });
-  await expect(
-    tool.execute("toolcall", {
-      command: "sleep 5",
-      pty: true,
-      timeout: 0.01,
-    }),
-  ).rejects.toThrow("Command timed out");
+  const tool = createExecTool({
+    allowBackground: false,
+    host: "gateway",
+    security: "full",
+    ask: "off",
+  });
+  const result = await tool.execute("toolcall", {
+    command: "sleep 5",
+    pty: true,
+    timeout: 0.01,
+  });
+
+  expect(result.details).toMatchObject({
+    status: "failed",
+    timedOut: true,
+    exitCode: 137,
+  });
+  expect((result.content[0] as { text?: string }).text).toMatch(/Command timed out/);
   expect(kill).toHaveBeenCalledTimes(1);
   expect(disposeData).toHaveBeenCalledTimes(1);
   expect(disposeExit).toHaveBeenCalledTimes(1);

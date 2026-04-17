@@ -1,26 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LookupFn } from "../../infra/net/ssrf.js";
 import * as logger from "../../logger.js";
-import {
-  createBaseWebFetchToolConfig,
-  installWebFetchSsrfHarness,
-} from "./web-fetch.test-harness.js";
+import { withFetchPreconnect } from "../../test-utils/fetch-mock.js";
+import { createBaseWebFetchToolConfig, makeFetchHeaders } from "./web-fetch.test-harness.js";
 import "./web-fetch.test-mocks.js";
 import { createWebFetchTool } from "./web-tools.js";
 
-const baseToolConfig = createBaseWebFetchToolConfig();
-installWebFetchSsrfHarness();
-
-function makeHeaders(map: Record<string, string>): { get: (key: string) => string | null } {
-  return {
-    get: (key) => map[key.toLowerCase()] ?? null,
-  };
-}
+const lookupMock = vi.fn();
+const baseToolConfig = createBaseWebFetchToolConfig({
+  lookupFn: lookupMock as unknown as LookupFn,
+});
 
 function markdownResponse(body: string, extraHeaders: Record<string, string> = {}): Response {
   return {
     ok: true,
     status: 200,
-    headers: makeHeaders({ "content-type": "text/markdown; charset=utf-8", ...extraHeaders }),
+    headers: makeFetchHeaders({
+      "content-type": "text/markdown; charset=utf-8",
+      ...extraHeaders,
+    }),
     text: async () => body,
   } as Response;
 }
@@ -29,15 +27,30 @@ function htmlResponse(body: string): Response {
   return {
     ok: true,
     status: 200,
-    headers: makeHeaders({ "content-type": "text/html; charset=utf-8" }),
+    headers: makeFetchHeaders({ "content-type": "text/html; charset=utf-8" }),
     text: async () => body,
   } as Response;
 }
 
 describe("web_fetch Cloudflare Markdown for Agents", () => {
+  const priorFetch = global.fetch;
+
+  beforeEach(() => {
+    lookupMock.mockImplementation(async (hostname: string) => {
+      void hostname;
+      return [{ address: "93.184.216.34", family: 4 }];
+    });
+  });
+
+  afterEach(() => {
+    global.fetch = priorFetch;
+    lookupMock.mockReset();
+    vi.restoreAllMocks();
+  });
+
   it("sends Accept header preferring text/markdown", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(markdownResponse("# Test Page\n\nHello world."));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
@@ -51,7 +64,7 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
   it("uses cf-markdown extractor for text/markdown responses", async () => {
     const md = "# CF Markdown\n\nThis is server-rendered markdown.";
     const fetchSpy = vi.fn().mockResolvedValue(markdownResponse(md));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
@@ -73,7 +86,7 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
     const html =
       "<html><body><article><h1>HTML Page</h1><p>Content here.</p></article></body></html>";
     const fetchSpy = vi.fn().mockResolvedValue(htmlResponse(html));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
@@ -83,12 +96,62 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
     expect(details?.contentType).toBe("text/html");
   });
 
+  it("bypasses Firecrawl when runtime metadata marks Firecrawl inactive", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(
+        htmlResponse(
+          "<html><body><article><h1>Runtime Off</h1><p>Use direct fetch.</p></article></body></html>",
+        ),
+      );
+    global.fetch = withFetchPreconnect(fetchSpy);
+
+    const tool = createWebFetchTool({
+      lookupFn: lookupMock as unknown as LookupFn,
+      config: {
+        plugins: {
+          entries: {
+            firecrawl: {
+              config: {
+                webFetch: {
+                  apiKey: {
+                    source: "env",
+                    provider: "default",
+                    id: "MISSING_FIRECRAWL_KEY_REF",
+                  },
+                },
+              },
+            },
+          },
+        },
+        tools: {
+          web: {
+            fetch: {
+              provider: "firecrawl",
+            },
+          },
+        },
+      },
+      sandboxed: false,
+      runtimeWebFetch: {
+        providerConfigured: "firecrawl",
+        providerSource: "configured",
+        diagnostics: [],
+      },
+    });
+
+    await tool?.execute?.("call", { url: "https://example.com/runtime-firecrawl-off" });
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://example.com/runtime-firecrawl-off");
+  });
+
   it("logs x-markdown-tokens when header is present", async () => {
     const logSpy = vi.spyOn(logger, "logDebug").mockImplementation(() => {});
     const fetchSpy = vi
       .fn()
       .mockResolvedValue(markdownResponse("# Tokens Test", { "x-markdown-tokens": "1500" }));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
@@ -98,7 +161,7 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
       expect.stringContaining("x-markdown-tokens: 1500 (https://example.com/...)"),
     );
     const tokenLogs = logSpy.mock.calls
-      .map(([message]) => String(message))
+      .map(([message]) => message)
       .filter((message) => message.includes("x-markdown-tokens"));
     expect(tokenLogs).toHaveLength(1);
     expect(tokenLogs[0]).not.toContain("token=secret");
@@ -108,7 +171,7 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
   it("converts markdown to text when extractMode is text", async () => {
     const md = "# Heading\n\n**Bold text** and [a link](https://example.com).";
     const fetchSpy = vi.fn().mockResolvedValue(markdownResponse(md));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
@@ -132,7 +195,7 @@ describe("web_fetch Cloudflare Markdown for Agents", () => {
   it("does not log x-markdown-tokens when header is absent", async () => {
     const logSpy = vi.spyOn(logger, "logDebug").mockImplementation(() => {});
     const fetchSpy = vi.fn().mockResolvedValue(markdownResponse("# No tokens"));
-    global.fetch = fetchSpy;
+    global.fetch = withFetchPreconnect(fetchSpy);
 
     const tool = createWebFetchTool(baseToolConfig);
 
