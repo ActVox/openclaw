@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 import {
+  runPracticePackEvals,
   scaffoldPracticePack,
   scaffoldSkillWorkshopProposal,
   validatePracticePackFile,
@@ -114,5 +115,30 @@ describe("practice-factory", () => {
       "utf8",
     );
     expect(embeddedScenarios).toContain("boundary-no-send");
+  });
+
+  it("runs deterministic pack evals", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "practice-evals-"));
+    const specPath = join(dir, "spec.yaml");
+    await writeFile(specPath, YAML.stringify(validSpec));
+    const result = await scaffoldPracticePack({
+      specPath,
+      outDir: join(dir, "practice-packs"),
+      repoRoot: dir,
+    });
+
+    await expect(
+      runPracticePackEvals({ packDir: result.packDir, repoRoot: dir }),
+    ).resolves.toMatchObject({
+      ok: true,
+      packsChecked: 1,
+      issues: [],
+    });
+    await expect(
+      runPracticePackEvals({ packsRoot: join(dir, "practice-packs"), repoRoot: dir }),
+    ).resolves.toMatchObject({
+      ok: true,
+      packsChecked: 1,
+    });
   });
 });

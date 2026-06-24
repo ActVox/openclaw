@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
 import {
+  runPracticePackEvals,
   scaffoldPracticePack,
   scaffoldSkillWorkshopProposal,
   validatePracticePackFile,
@@ -45,6 +46,22 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
 
+  if (command === "eval") {
+    const packDir = stringFlag(flags, "pack");
+    const packsRoot = stringFlag(flags, "packs-root");
+    const result = await runPracticePackEvals({ packDir, packsRoot });
+    if (result.ok) {
+      console.log(`practice pack evals passed: ${result.packsChecked} pack(s)`);
+      return;
+    }
+    console.error(`practice pack evals failed: ${result.packsChecked} pack(s)`);
+    for (const issue of result.issues) {
+      console.error(`- ${issue.pack} ${issue.path}: ${issue.message}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   printHelp();
   if (command && command !== "help") process.exitCode = 1;
 }
@@ -73,7 +90,7 @@ function stringFlag(flags: Record<string, string | boolean>, key: string): strin
 
 function printHelp(): void {
   console.log(
-    `Practice Factory\n\nUsage:\n  node --import tsx scripts/practice-factory/cli.ts validate --spec <PACK.yaml>\n  node --import tsx scripts/practice-factory/cli.ts new --spec <spec.yaml> [--out-dir practice-packs]\n  node --import tsx scripts/practice-factory/cli.ts proposal --spec <spec.yaml> --out-dir <proposal-root>\n`,
+    `Practice Factory\n\nUsage:\n  node --import tsx scripts/practice-factory/cli.ts validate --spec <PACK.yaml>\n  node --import tsx scripts/practice-factory/cli.ts new --spec <spec.yaml> [--out-dir practice-packs]\n  node --import tsx scripts/practice-factory/cli.ts proposal --spec <spec.yaml> --out-dir <proposal-root>\n  node --import tsx scripts/practice-factory/cli.ts eval [--pack <pack-dir> | --packs-root practice-packs]\n`,
   );
 }
 

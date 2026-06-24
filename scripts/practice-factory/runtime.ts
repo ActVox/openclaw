@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import YAML from "yaml";
 import {
@@ -22,6 +22,18 @@ export interface ScaffoldSkillWorkshopProposalOptions {
   specPath: string;
   outDir: string;
   repoRoot?: string;
+}
+
+export interface PracticePackEvalIssue {
+  pack: string;
+  path: string;
+  message: string;
+}
+
+export interface PracticePackEvalResult {
+  ok: boolean;
+  packsChecked: number;
+  issues: PracticePackEvalIssue[];
 }
 
 export async function loadPracticePackSpec(specPath: string): Promise<PracticePackSpec> {
@@ -115,6 +127,141 @@ async function writePackFiles(spec: PracticePackSpec, packDir: string): Promise<
   );
   await writeFile(files[5], renderReferencesReadme(spec));
   return files;
+}
+
+export async function runPracticePackEvals(
+  options: {
+    packDir?: string;
+    packsRoot?: string;
+    repoRoot?: string;
+  } = {},
+): Promise<PracticePackEvalResult> {
+  const repoRoot = resolve(options.repoRoot ?? process.cwd());
+  const packDirs = options.packDir
+    ? [resolve(repoRoot, options.packDir)]
+    : await listPracticePackDirs(resolve(repoRoot, options.packsRoot ?? "practice-packs"));
+
+  const issues: PracticePackEvalIssue[] = [];
+  for (const packDir of packDirs) {
+    await evaluatePackDir(packDir, issues);
+  }
+  return { ok: issues.length === 0, packsChecked: packDirs.length, issues };
+}
+
+async function listPracticePackDirs(packsRoot: string): Promise<string[]> {
+  const entries = await readdir(packsRoot, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(packsRoot, entry.name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function evaluatePackDir(packDir: string, issues: PracticePackEvalIssue[]): Promise<void> {
+  const packPath = join(packDir, "PACK.yaml");
+  const spec = await loadPracticePackSpec(packPath);
+  const skillPath = join(packDir, "SKILL.md");
+  const scenariosPath = join(packDir, "scenarios", "phase1.jsonl");
+  const expectedShapePath = join(packDir, "evals", "expected-output-shape.json");
+  const rubricPath = join(packDir, "evals", "rubric.md");
+
+  const skill = await readFile(skillPath, "utf8");
+  const expectedShape = JSON.parse(await readFile(expectedShapePath, "utf8")) as {
+    sections?: unknown;
+  };
+  const rubric = await readFile(rubricPath, "utf8");
+  const scenarios = parseJsonl(await readFile(scenariosPath, "utf8"));
+
+  for (const section of spec.output_schema.sections) {
+    if (!skill.includes(`### ${section}`)) {
+      issues.push({
+        pack: spec.id,
+        path: "SKILL.md",
+        message: `missing output section ${section}`,
+      });
+    }
+    if (!rubric.includes(`\`${section}\``)) {
+      issues.push({
+        pack: spec.id,
+        path: "evals/rubric.md",
+        message: `rubric does not check ${section}`,
+      });
+    }
+  }
+
+  const shapeSections = Array.isArray(expectedShape.sections) ? expectedShape.sections : [];
+  for (const section of spec.output_schema.sections) {
+    if (!shapeSections.includes(section)) {
+      issues.push({
+        pack: spec.id,
+        path: "evals/expected-output-shape.json",
+        message: `expected shape missing ${section}`,
+      });
+    }
+  }
+
+  for (const boundary of spec.boundaries) {
+    if (!skill.includes(boundary)) {
+      issues.push({ pack: spec.id, path: "SKILL.md", message: `missing boundary: ${boundary}` });
+    }
+  }
+
+  const scenarioIds = new Set<string>();
+  for (const [index, scenario] of scenarios.entries()) {
+    if (!isRecord(scenario)) {
+      issues.push({
+        pack: spec.id,
+        path: `scenarios/phase1.jsonl:${index + 1}`,
+        message: "scenario must be object",
+      });
+      continue;
+    }
+    if (scenario.pack !== spec.id) {
+      issues.push({
+        pack: spec.id,
+        path: `scenarios/phase1.jsonl:${index + 1}`,
+        message: "scenario pack id mismatch",
+      });
+    }
+    if (typeof scenario.id !== "string" || scenario.id.trim() === "") {
+      issues.push({
+        pack: spec.id,
+        path: `scenarios/phase1.jsonl:${index + 1}`,
+        message: "scenario id required",
+      });
+    } else {
+      scenarioIds.add(scenario.id);
+    }
+    const expect = isRecord(scenario.expect) ? scenario.expect : undefined;
+    if (!expect || !Array.isArray(expect.must_include) || expect.must_include.length === 0) {
+      issues.push({
+        pack: spec.id,
+        path: `scenarios/phase1.jsonl:${index + 1}`,
+        message: "scenario must include non-empty expect.must_include",
+      });
+    }
+  }
+
+  for (const required of ["positive", "boundary", "regression"]) {
+    if (![...scenarioIds].some((id) => id.includes(required))) {
+      issues.push({
+        pack: spec.id,
+        path: "scenarios/phase1.jsonl",
+        message: `missing ${required} scenario`,
+      });
+    }
+  }
+}
+
+function parseJsonl(content: string): unknown[] {
+  return content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseStructured(content: string, sourcePath: string): unknown {
