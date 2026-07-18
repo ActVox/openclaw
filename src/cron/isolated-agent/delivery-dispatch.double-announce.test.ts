@@ -399,6 +399,17 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       to: "123456",
       payloads: [{ text: "Fallback cron summary." }],
       deliveryIntentId: expect.stringContaining("cron-direct-delivery:v1:"),
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "telegram",
+        sessionKey: "agent:main",
+        context: {
+          channelId: "telegram",
+          conversationId: "123456",
+          sessionKey: "agent:main",
+        },
+      },
+      skipQueue: true,
     });
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(true);
