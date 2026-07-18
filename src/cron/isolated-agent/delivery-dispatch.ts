@@ -351,6 +351,17 @@ export async function dispatchCronDelivery(
           accountId: delivery.accountId,
           threadId: delivery.threadId,
           payloads: payloadsForDelivery,
+          replyPayloadSendingHook: {
+            kind: "final",
+            channel: delivery.channel,
+            sessionKey: params.agentSessionKey,
+            context: {
+              channelId: delivery.channel,
+              ...(delivery.accountId ? { accountId: delivery.accountId } : {}),
+              conversationId: delivery.to,
+              sessionKey: params.agentSessionKey,
+            },
+          },
           session: deliverySession,
           identity,
           bestEffort: params.deliveryBestEffort,
