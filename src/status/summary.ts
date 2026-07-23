@@ -44,6 +44,7 @@ import {
   summarizeRetainedLostTaskAuditFindings,
 } from "../tasks/task-registry.audit.js";
 import { deliveryContextFromSession } from "../utils/delivery-context.shared.js";
+import { buildTaskStatusSnapshot } from "../tasks/task-status.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import type { HeartbeatStatus, SessionStatus, StatusSummary } from "./types.js";
 
@@ -353,13 +354,21 @@ export async function getStatusSummary(
   // the writable process registry or its schema-owning shared-state handle.
   const taskInspection = taskMaintenanceModule.inspectTasksReadOnly();
   const inspectableTasks = taskInspection.tasks;
-  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(inspectableTasks);
-  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const now = Date.now();
+  const taskStatusSnapshot = buildTaskStatusSnapshot(inspectableTasks, { now });
+  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(
+    taskStatusSnapshot.visible,
+  );
+  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const taskAudit = summarizeActionableTaskAuditFindings(taskAuditFindings, { now });
   const taskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(taskAuditFindings, { now });
+  const visibleTaskIds = new Set(taskStatusSnapshot.visible.map((task) => task.taskId));
+  const visibleTaskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(
+    taskAuditFindings.filter((finding) => visibleTaskIds.has(finding.task.taskId)),
+    { now },
+  );
   const tasks: StatusSummary["tasks"] = {
-    ...discountRetainedLostTaskFailures(rawTasks, taskAuditRetainedLost.count),
+    ...discountRetainedLostTaskFailures(rawTasks, visibleTaskAuditRetainedLost.count),
     ...(taskInspection.state === "migration-required"
       ? {
           warning:
