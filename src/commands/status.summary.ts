@@ -31,6 +31,7 @@ import {
   summarizeActionableTaskAuditFindings,
   summarizeRetainedLostTaskAuditFindings,
 } from "../tasks/task-registry.audit.js";
+import { buildTaskStatusSnapshot } from "../tasks/task-status.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import type { HeartbeatStatus, SessionStatus, StatusSummary } from "./status.types.js";
 
@@ -347,12 +348,20 @@ export async function getStatusSummary(
   const taskMaintenanceModule = await loadTaskRegistryMaintenanceModule();
   taskMaintenanceModule.configureTaskRegistryMaintenance();
   const inspectableTasks = taskMaintenanceModule.reconcileInspectableTasks();
-  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(inspectableTasks);
-  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const now = Date.now();
+  const taskStatusSnapshot = buildTaskStatusSnapshot(inspectableTasks, { now });
+  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(
+    taskStatusSnapshot.visible,
+  );
+  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const taskAudit = summarizeActionableTaskAuditFindings(taskAuditFindings, { now });
   const taskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(taskAuditFindings, { now });
-  const tasks = discountRetainedLostTaskFailures(rawTasks, taskAuditRetainedLost.count);
+  const visibleTaskIds = new Set(taskStatusSnapshot.visible.map((task) => task.taskId));
+  const visibleTaskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(
+    taskAuditFindings.filter((finding) => visibleTaskIds.has(finding.task.taskId)),
+    { now },
+  );
+  const tasks = discountRetainedLostTaskFailures(rawTasks, visibleTaskAuditRetainedLost.count);
 
   const resolved = resolveConfiguredStatusModelRef({
     cfg,
