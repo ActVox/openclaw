@@ -443,7 +443,6 @@ describe("dispatchCronDelivery — double-announce guard", () => {
           sessionKey: "agent:main",
         },
       },
-      skipQueue: true,
     });
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(true);
