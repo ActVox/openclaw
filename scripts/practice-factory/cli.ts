@@ -70,7 +70,7 @@ function parseFlags(args: string[]): Record<string, string | boolean> {
   const flags: Record<string, string | boolean> = {};
   for (let i = 0; i < args.length; i++) {
     const token = args[i];
-    if (!token.startsWith("--")) continue;
+    if (token === undefined || !token.startsWith("--")) continue;
     const key = token.slice(2);
     const next = args[i + 1];
     if (!next || next.startsWith("--")) {

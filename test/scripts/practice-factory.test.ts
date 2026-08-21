@@ -83,6 +83,8 @@ describe("practice-factory", () => {
     });
 
     expect(result.packDir).toContain("bateson.relationship-pattern-map");
+    expect(result.files).toHaveLength(6);
+    expect(result.files.every((file) => file.length > 0)).toBe(true);
     const skill = await readFile(join(result.packDir, "SKILL.md"), "utf8");
     expect(skill).toContain("Relationship Pattern Map");
     expect(skill).toContain("content_vs_relationship_message");
@@ -103,6 +105,8 @@ describe("practice-factory", () => {
       outDir: join(dir, "proposals"),
       repoRoot: dir,
     });
+    expect(result.files).toHaveLength(5);
+    expect(result.files.every((file) => file.length > 0)).toBe(true);
     const proposal = await readFile(join(result.proposalDir, "PROPOSAL.md"), "utf8");
     expect(proposal).toContain("status: proposal");
     expect(proposal).toContain("Relationship Pattern Map");
