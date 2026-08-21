@@ -88,7 +88,7 @@ export async function scaffoldSkillWorkshopProposal(
       `---\nstatus: proposal\nversion: "${spec.version}"\ndate: "${new Date(0).toISOString()}"\n`,
     ),
   );
-  await writeFile(packPath, `${YAML.stringify(spec, { lineWidth: 100 })}`);
+  await writeFile(packPath, YAML.stringify(spec, { lineWidth: 100 }));
   await writeFile(scenariosPath, renderScenarios(spec));
   await writeFile(rubricPath, renderRubric(spec));
   await writeFile(
@@ -112,7 +112,7 @@ async function writePackFiles(spec: PracticePackSpec, packDir: string): Promise<
   await mkdir(join(packDir, "evals"), { recursive: true });
   await mkdir(join(packDir, "references"), { recursive: true });
 
-  await writeFile(packPath, `${YAML.stringify(spec, { lineWidth: 100 })}`);
+  await writeFile(packPath, YAML.stringify(spec, { lineWidth: 100 }));
   await writeFile(skillPath, renderSkill(spec));
   await writeFile(scenariosPath, renderScenarios(spec));
   await writeFile(rubricPath, renderRubric(spec));
@@ -148,7 +148,7 @@ async function listPracticePackDirs(packsRoot: string): Promise<string[]> {
   return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(packsRoot, entry.name))
-    .sort((a, b) => a.localeCompare(b));
+    .toSorted((a, b) => a.localeCompare(b));
 }
 
 async function evaluatePackDir(packDir: string, issues: PracticePackEvalIssue[]): Promise<void> {
@@ -257,7 +257,9 @@ function parseJsonl(content: string): unknown[] {
 
 function parseStructured(content: string, sourcePath: string): unknown {
   const ext = basename(sourcePath).toLowerCase();
-  if (ext.endsWith(".json")) return JSON.parse(content);
+  if (ext.endsWith(".json")) {
+    return JSON.parse(content);
+  }
   return YAML.parse(content);
 }
 

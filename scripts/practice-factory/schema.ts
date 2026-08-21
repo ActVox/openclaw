@@ -115,7 +115,9 @@ function validateHarness(value: unknown, issues: ValidationIssue[]): void {
   requireStringArray(value, "suites", issues, { pathPrefix: "harness", min: 1 });
 
   const scenarios = value.scenarios;
-  if (scenarios === undefined) return;
+  if (scenarios === undefined) {
+    return;
+  }
   if (!Array.isArray(scenarios)) {
     issues.push({ path: "harness.scenarios", message: "must be an array when present" });
     return;
@@ -142,7 +144,9 @@ function validateHarness(value: unknown, issues: ValidationIssue[]): void {
       requireStringArray(scenario, "must_not_include", issues, { pathPrefix: base, min: 1 });
     }
     if (typeof scenario.id === "string") {
-      if (ids.has(scenario.id)) issues.push({ path: `${base}.id`, message: "must be unique" });
+      if (ids.has(scenario.id)) {
+        issues.push({ path: `${base}.id`, message: "must be unique" });
+      }
       ids.add(scenario.id);
     }
   }

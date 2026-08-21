@@ -84,6 +84,7 @@ describe("practice-factory", () => {
 
     expect(result.packDir).toContain("bateson.relationship-pattern-map");
     expect(result.files).toHaveLength(6);
+    expect(result.files).toContain(join(result.packDir, "PACK.yaml"));
     expect(result.files.every((file) => file.length > 0)).toBe(true);
     const skill = await readFile(join(result.packDir, "SKILL.md"), "utf8");
     expect(skill).toContain("Relationship Pattern Map");
