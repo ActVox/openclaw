@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import YAML from "yaml";
 import {
   assertPracticePackSpec,
@@ -258,10 +259,6 @@ function parseJsonl(content: string): unknown[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseStructured(content: string, sourcePath: string): unknown {

@@ -1,3 +1,5 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+
 export type PracticePackStatus = "draft" | "active" | "deprecated";
 
 export interface PracticePackSpec {
@@ -207,8 +209,4 @@ function requireRecord(
   if (!isRecord(record[key])) {
     issues.push({ path: key, message: "must be an object" });
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
