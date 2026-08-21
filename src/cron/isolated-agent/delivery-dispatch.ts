@@ -72,16 +72,14 @@ export { queueCronMessageToolDeliveryAwareness, resolveCronDeliveryBestEffort };
 export async function dispatchCronDelivery(
   params: DispatchCronDeliveryParams,
 ): Promise<DispatchCronDeliveryState> {
-  const sourceDeliverySatisfied = params.sourceDeliveryOutcome.satisfiesSourceDelivery;
   const requiresCurrentSessionCompletion = params.job.sessionTarget === "current";
-  const verifiedMessageToolDelivery = params.sourceDeliveryOutcome.verifiedMessageToolDelivery;
   let summary = params.summary;
   let outputText = params.outputText;
   let synthesizedText = params.synthesizedText;
   let deliveryPayloads = params.deliveryPayloads;
 
-  let delivered = verifiedMessageToolDelivery;
-  let deliveryAttempted = verifiedMessageToolDelivery;
+  let delivered = params.sourceDeliveryOutcome.verifiedMessageToolDelivery;
+  let deliveryAttempted = params.sourceDeliveryOutcome.verifiedMessageToolDelivery;
   let deliveryError: string | undefined;
   let deliverySuppressionReason: NormalizeReplySkipReason | undefined;
   let directCronSessionCleanupAttempted = false;
@@ -181,6 +179,7 @@ export async function dispatchCronDelivery(
     options?: { retryTransient?: boolean },
   ): Promise<RunCronAgentTurnResult | null> => {
     const {
+      buildCronReplyHook,
       buildOutboundSessionContext,
       createOutboundSendDeps,
       durableMessageBatchMayHaveReachedRecipient,
@@ -351,17 +350,7 @@ export async function dispatchCronDelivery(
           accountId: delivery.accountId,
           threadId: delivery.threadId,
           payloads: payloadsForDelivery,
-          replyPayloadSendingHook: {
-            kind: "final",
-            channel: delivery.channel,
-            sessionKey: params.agentSessionKey,
-            context: {
-              channelId: delivery.channel,
-              ...(delivery.accountId ? { accountId: delivery.accountId } : {}),
-              conversationId: delivery.to,
-              sessionKey: params.agentSessionKey,
-            },
-          },
+          replyPayloadSendingHook: buildCronReplyHook(delivery, params.agentSessionKey),
           session: deliverySession,
           identity,
           bestEffort: params.deliveryBestEffort,
@@ -728,7 +717,7 @@ export async function dispatchCronDelivery(
   if (
     params.deliveryRequested &&
     !params.skipHeartbeatDelivery &&
-    (!sourceDeliverySatisfied || requiresCurrentSessionCompletion)
+    (!params.sourceDeliveryOutcome.satisfiesSourceDelivery || requiresCurrentSessionCompletion)
   ) {
     if (!params.resolvedDelivery.ok) {
       if (requiresCurrentSessionCompletion) {
