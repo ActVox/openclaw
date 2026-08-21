@@ -144,10 +144,11 @@ describe("read tool", () => {
 
   it("rejects unrecognized binary content after decoding", async () => {
     const binary = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0x00, 0x7f]);
+    const decodeText = vi.fn(({ buffer }: { buffer: Buffer }) => buffer.toString("utf8"));
     const tool = createReadToolDefinition("/workspace", {
       operations: {
         access: async () => {},
-        decodeText: ({ buffer }) => buffer.toString("utf8"),
+        decodeText,
         detectImageMimeType: async () => null,
         readFile: async () => binary,
       },
@@ -156,6 +157,7 @@ describe("read tool", () => {
     await expect(
       tool.execute("call-binary", { path: "payload.txt" }, undefined, undefined, {} as never),
     ).rejects.toThrow(/binary content.*text and image files/i);
+    expect(decodeText).toHaveBeenCalledOnce();
   });
 
   it("rejects sparse NUL bytes regardless of printable-text ratio", async () => {
