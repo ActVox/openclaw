@@ -43,8 +43,8 @@ import {
   summarizeActionableTaskAuditFindings,
   summarizeRetainedLostTaskAuditFindings,
 } from "../tasks/task-registry.audit.js";
-import { deliveryContextFromSession } from "../utils/delivery-context.shared.js";
 import { buildTaskStatusSnapshot } from "../tasks/task-status.js";
+import { deliveryContextFromSession } from "../utils/delivery-context.shared.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import type { HeartbeatStatus, SessionStatus, StatusSummary } from "./types.js";
 

@@ -60,7 +60,8 @@ harness:
   scenarios:
     - id: positive-relationship-pattern
       title: maps content and relationship messages
-      input: "Разбери не она сказала / я сказал, а паттерн отношений: какой pattern connects эти эпизоды,
+      input:
+        "Разбери не она сказала / я сказал, а паттерн отношений: какой pattern connects эти эпизоды,
         где content message, где relationship message?"
       must_include:
         - pattern
