@@ -9,35 +9,31 @@ import {
   type ValidationResult,
 } from "./schema.js";
 
-export interface LoadPracticePackOptions {
-  repoRoot?: string;
-}
-
-export interface ScaffoldPracticePackOptions {
+interface ScaffoldPracticePackOptions {
   specPath: string;
   outDir?: string;
   repoRoot?: string;
 }
 
-export interface ScaffoldSkillWorkshopProposalOptions {
+interface ScaffoldSkillWorkshopProposalOptions {
   specPath: string;
   outDir: string;
   repoRoot?: string;
 }
 
-export interface PracticePackEvalIssue {
+interface PracticePackEvalIssue {
   pack: string;
   path: string;
   message: string;
 }
 
-export interface PracticePackEvalResult {
+interface PracticePackEvalResult {
   ok: boolean;
   packsChecked: number;
   issues: PracticePackEvalIssue[];
 }
 
-export async function loadPracticePackSpec(specPath: string): Promise<PracticePackSpec> {
+async function loadPracticePackSpec(specPath: string): Promise<PracticePackSpec> {
   const content = await readFile(specPath, "utf8");
   const parsed = parseStructured(content, specPath);
   return assertPracticePackSpec(parsed);

@@ -1,6 +1,6 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 
-export type PracticePackStatus = "draft" | "active" | "deprecated";
+type PracticePackStatus = "draft" | "active" | "deprecated";
 
 export interface PracticePackSpec {
   id: string;
@@ -24,7 +24,7 @@ export interface PracticePackSpec {
   };
 }
 
-export interface PracticePackScenario {
+interface PracticePackScenario {
   id: string;
   title: string;
   input: string;
@@ -32,7 +32,7 @@ export interface PracticePackScenario {
   must_not_include?: string[];
 }
 
-export interface ValidationIssue {
+interface ValidationIssue {
   path: string;
   message: string;
 }
