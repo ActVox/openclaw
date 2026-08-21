@@ -717,7 +717,7 @@ describe("getStatusSummary", () => {
 
     expect(summary.tasks.failures).toBe(1);
     expect(summary.tasks.byStatus.failed).toBe(1);
-    expect(summary.taskAuditRetainedLost.count).toBe(1);
+    expect(summary.taskAuditRetainedLost).toMatchObject({ count: 1 });
   });
 
   it("skips channel summary imports when no channels are configured", async () => {
