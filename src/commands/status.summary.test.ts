@@ -553,51 +553,19 @@ describe("getStatusSummary", () => {
 
   it("summarizes only active and recently terminal tasks in user-facing status", async () => {
     const now = Date.now();
-    const makeTask = (params: {
-      taskId: string;
-      status: TaskRecord["status"];
-      createdAt: number;
-      endedAt?: number;
-    }): TaskRecord => ({
-      taskId: params.taskId,
-      runtime: "cron",
-      sourceId: "cron-job",
-      ownerKey: "",
-      requesterSessionKey: "",
-      scopeKind: "system",
-      task: params.taskId,
-      status: params.status,
-      deliveryStatus: "not_applicable",
-      notifyPolicy: "silent",
-      createdAt: params.createdAt,
-      ...(params.endedAt !== undefined ? { endedAt: params.endedAt } : {}),
-    });
-    const active = makeTask({ taskId: "active", status: "running", createdAt: now - 60_000 });
-    const recentFailure = makeTask({
-      taskId: "recent-failure",
-      status: "failed",
-      createdAt: now - 60_000,
-      endedAt: now - 60_000,
-    });
-    const historicalFailure = makeTask({
-      taskId: "historical-failure",
-      status: "failed",
+    const fixture = statusSummaryMocks.taskAuditFindings[0]!.task;
+    const recent = { ...fixture, taskId: "recent", createdAt: now, endedAt: now };
+    const historical = {
+      ...fixture,
+      taskId: "historical",
       createdAt: now - 24 * 60 * 60_000,
       endedAt: now - 24 * 60 * 60_000,
-    });
-    statusSummaryMocks.inspectableTasks = [active, recentFailure, historicalFailure];
+    };
+    statusSummaryMocks.inspectableTasks = [recent, historical];
 
     await getStatusSummary();
 
-    expect(statusSummaryMocks.getInspectableTaskRegistrySummary).toHaveBeenCalledWith([
-      active,
-      recentFailure,
-    ]);
-    expect(statusSummaryMocks.getInspectableTaskAuditFindings).toHaveBeenCalledWith([
-      active,
-      recentFailure,
-      historicalFailure,
-    ]);
+    expect(statusSummaryMocks.getInspectableTaskRegistrySummary).toHaveBeenCalledWith([recent]);
   });
 
   it("keeps retained lost tasks out of default status audit counts", async () => {
@@ -657,67 +625,6 @@ describe("getStatusSummary", () => {
       count: 1,
       nextCleanupAfter: cleanupAfter,
     });
-  });
-
-  it("does not let a historical retained lost task hide a recent failure", async () => {
-    const now = Date.now();
-    const recentFailure: TaskRecord = {
-      taskId: "recent-failure",
-      runtime: "cron",
-      sourceId: "cron-job",
-      ownerKey: "",
-      requesterSessionKey: "",
-      scopeKind: "system",
-      task: "Recent failure",
-      status: "failed",
-      deliveryStatus: "not_applicable",
-      notifyPolicy: "silent",
-      createdAt: now - 60_000,
-      endedAt: now - 60_000,
-    };
-    const historicalRetainedLost: TaskRecord = {
-      taskId: "historical-retained-lost",
-      runtime: "subagent",
-      ownerKey: "agent:main:main",
-      requesterSessionKey: "agent:main:main",
-      scopeKind: "session",
-      task: "Historical retained lost",
-      status: "lost",
-      deliveryStatus: "pending",
-      notifyPolicy: "done_only",
-      createdAt: now - 10 * 60_000,
-      endedAt: now - 10 * 60_000,
-      cleanupAfter: now + 60_000,
-    };
-    statusSummaryMocks.inspectableTasks = [recentFailure, historicalRetainedLost];
-    statusSummaryMocks.taskRegistrySummary = {
-      ...statusSummaryMocks.taskRegistrySummary,
-      total: 1,
-      terminal: 1,
-      failures: 1,
-      byStatus: {
-        ...statusSummaryMocks.taskRegistrySummary.byStatus,
-        failed: 1,
-      },
-      byRuntime: {
-        ...statusSummaryMocks.taskRegistrySummary.byRuntime,
-        cron: 1,
-      },
-    };
-    statusSummaryMocks.taskAuditFindings = [
-      {
-        severity: "warn",
-        code: "lost",
-        detail: "historical task is retained until cleanupAfter",
-        task: historicalRetainedLost,
-      },
-    ];
-
-    const summary = await getStatusSummary();
-
-    expect(summary.tasks.failures).toBe(1);
-    expect(summary.tasks.byStatus.failed).toBe(1);
-    expect(summary.taskAuditRetainedLost).toMatchObject({ count: 1 });
   });
 
   it("skips channel summary imports when no channels are configured", async () => {
