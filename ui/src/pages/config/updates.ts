@@ -1,9 +1,13 @@
 // Curated Updates settings presentation. The existing update config remains
 // the source of authored policy; the Gateway schedule DTO owns runtime status.
+import { parseDateStringTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import { asNullableRecord as asConfigRecord } from "@openclaw/normalization-core/record-coerce";
 import { html, nothing, type TemplateResult } from "lit";
 import type { UpdateAvailable, UpdateScheduleState } from "../../api/types.ts";
-import type { ApplicationStatusBanner } from "../../app/update-overlay-helpers.ts";
+import type {
+  ApplicationStatusBanner,
+  RecordedUpdateAttempt,
+} from "../../app/update-overlay-helpers.ts";
 import {
   formatUpdateCampaignLabel,
   formatUpdateTargetLabel,
@@ -19,6 +23,7 @@ import {
   renderSettingsValue,
 } from "../../components/settings-ui.ts";
 import { t } from "../../i18n/index.ts";
+import { formatDateTimeMs, formatTimeAgo } from "../../lib/format.ts";
 
 type UpdatesChannel = "stable" | "beta" | "dev" | "extended-stable";
 
@@ -26,13 +31,17 @@ type UpdatesViewProps = {
   configObject: Record<string, unknown>;
   gatewayVersion: string | null;
   controlUiCommit: string | null;
+  controlUiCommitAt: string | null;
+  controlUiBuiltAt: string | null;
   schedule: UpdateScheduleState | null;
   heldUpdateCampaignId: string | null;
   updateAvailable: UpdateAvailable | null;
   statusBanner: ApplicationStatusBanner | null;
+  recordedAttempt: RecordedUpdateAttempt | null;
   configBusy: boolean;
   canAdmin: boolean;
   canUpdate: boolean;
+  canCheckStatus: boolean;
   canHoldUpdate: boolean;
   updateBusy: boolean;
   nowMs?: number;
@@ -40,7 +49,103 @@ type UpdatesViewProps = {
   onAutomaticUpdatesChange: (enabled: boolean) => void;
   onUpdateNow: () => void;
   onHoldUpdate: () => Promise<boolean>;
+  onCheckStatus: () => Promise<void>;
 };
+
+function formatAttemptIdentity(version: string | null, sha: string | null): string {
+  return version ? `v${version}` : sha ? sha.slice(0, 12) : t("common.unknown");
+}
+
+function renderRecordedAttempt(props: UpdatesViewProps) {
+  const attempt = props.recordedAttempt;
+  if (!attempt && !props.statusBanner) {
+    return nothing;
+  }
+  const canRetry = props.canUpdate && !props.updateBusy;
+  const recordedTarget = attempt
+    ? formatAttemptIdentity(attempt.targetVersion, attempt.targetSha)
+    : null;
+  const target =
+    recordedTarget && recordedTarget !== t("common.unknown")
+      ? recordedTarget
+      : (formatUpdateTargetLabel(props.schedule, props.updateAvailable) ?? t("common.unknown"));
+  return renderSettingsSection({ title: t("updates.page.latestAttempt") }, [
+    attempt
+      ? renderSettingsRow({
+          title: t("updates.page.attemptedAt"),
+          control: renderTimestamp(attempt.timestampMs, props.nowMs),
+        })
+      : nothing,
+    renderSettingsRow({
+      title: t("updates.page.attemptTarget"),
+      control: renderSettingsValue(target, { mono: true }),
+    }),
+    attempt
+      ? renderSettingsRow({
+          title: t("updates.page.installedIdentity"),
+          control: renderSettingsValue(
+            formatAttemptIdentity(attempt.installedVersion, attempt.installedSha),
+            { mono: true },
+          ),
+        })
+      : nothing,
+    attempt?.installKind
+      ? renderSettingsRow({
+          title: t("updates.page.attemptInstallKind"),
+          control: renderSettingsValue(attempt.installKind),
+        })
+      : nothing,
+    attempt
+      ? renderSettingsRow({
+          title: t("updates.page.attemptReason"),
+          control: renderSettingsValue(html`<code>${attempt.reason}</code>`, { mono: true }),
+        })
+      : nothing,
+    attempt?.failure
+      ? renderSettingsRow({
+          title: t("updates.page.failedStep"),
+          stacked: true,
+          control: html`<details class="updates-attempt-details">
+            <summary>${t("updates.page.viewDetails")}</summary>
+            <div><code>${attempt.failure.step}</code></div>
+            <pre>${attempt.failure.detail}</pre>
+          </details>`,
+        })
+      : nothing,
+    renderSettingsRow({
+      title: t("updates.page.recoveryActions"),
+      control: html`<div class="updates-status-control">
+        <button
+          class="btn btn--sm"
+          type="button"
+          title=${props.canCheckStatus ? "" : t("updates.adminRequired")}
+          ?disabled=${!props.canCheckStatus || props.updateBusy}
+          @click=${() => void props.onCheckStatus()}
+        >
+          ${t("updates.page.checkStatus")}
+        </button>
+        <button
+          class="btn btn--sm primary"
+          type="button"
+          title=${canRetry ? "" : t("updates.adminRequired")}
+          ?disabled=${!canRetry}
+          @click=${props.onUpdateNow}
+        >
+          ${t("updates.page.retryUpdate")}
+        </button>
+      </div>`,
+    }),
+    renderSettingsRow({
+      title: t("updates.page.cliFallback"),
+      stacked: true,
+      control: html`<details class="updates-attempt-details">
+        <summary>${t("updates.page.showCliFallback")}</summary>
+        <pre><code>openclaw update status --json
+openclaw update</code></pre>
+      </details>`,
+    }),
+  ]);
+}
 
 function readUpdatesSettings(
   configObject: Record<string, unknown>,
@@ -67,8 +172,25 @@ function readUpdatesSettings(
   };
 }
 
+function parseTimestampMs(value: string | null): number | null {
+  return parseDateStringTimestampMs(value) ?? null;
+}
+
+function renderTimestamp(timestampMs: number, nowMs = Date.now()) {
+  const relative = formatTimeAgo(Math.max(0, nowMs - timestampMs));
+  return renderSettingsValue(
+    html`<time datetime=${new Date(timestampMs).toISOString()} title=${relative}
+      >${formatDateTimeMs(timestampMs, { dateStyle: "medium", timeStyle: "short" })}
+      <span class="muted">· ${relative}</span></time
+    >`,
+  );
+}
+
 function renderBuildFacts(props: UpdatesViewProps) {
   const installKind = props.schedule?.install?.kind;
+  const git = props.schedule?.install?.git;
+  const builtAtMs = parseTimestampMs(props.controlUiBuiltAt);
+  const commitAtMs = git?.commitAtMs ?? parseTimestampMs(props.controlUiCommitAt);
   return renderSettingsSection({ title: t("updates.page.buildTitle") }, [
     renderSettingsRow({
       title: t("updates.page.gatewayVersion"),
@@ -90,6 +212,27 @@ function renderBuildFacts(props: UpdatesViewProps) {
         { mono: true },
       ),
     }),
+    builtAtMs === null
+      ? nothing
+      : renderSettingsRow({
+          title: t("updates.page.builtAt"),
+          control: renderTimestamp(builtAtMs, props.nowMs),
+        }),
+    installKind === "git"
+      ? renderSettingsRow({
+          title: t("updates.page.installedAt"),
+          control:
+            git?.installedAtMs === undefined
+              ? renderSettingsValue(t("updates.page.installedAtUnknown"))
+              : renderTimestamp(git.installedAtMs, props.nowMs),
+        })
+      : nothing,
+    commitAtMs === null
+      ? nothing
+      : renderSettingsRow({
+          title: t("updates.page.lastCommitAt"),
+          control: renderTimestamp(commitAtMs, props.nowMs),
+        }),
     installKind
       ? renderSettingsRow({
           title: t("updates.page.installKind"),
@@ -116,10 +259,44 @@ function renderScheduleStatus(props: UpdatesViewProps): TemplateResult {
           ? "warn"
           : "accent";
     label = props.statusBanner.text;
+  } else if (props.schedule?.install?.kind === "git") {
+    const git = props.schedule.install.git;
+    if (!git) {
+      label = t("updates.page.statusUnavailable");
+    } else if (git.status === "current") {
+      kind = "ok";
+      label = t("updates.page.upToDate");
+    } else if (git.status === "behind") {
+      kind = "accent";
+      const lag = t(
+        git.commitsBehind === 1 ? "updates.target.commitBehind" : "updates.target.commitsBehind",
+        { count: String(git.commitsBehind) },
+      );
+      label = t("updates.page.available", { target: lag });
+    } else if (git.status === "ahead") {
+      label = t(
+        git.commitsAhead === 1 ? "updates.page.gitCommitAhead" : "updates.page.gitCommitsAhead",
+        { count: String(git.commitsAhead) },
+      );
+    } else if (git.status === "diverged") {
+      kind = "warn";
+      label = t("updates.page.gitDiverged", {
+        ahead: String(git.commitsAhead),
+        behind: String(git.commitsBehind),
+      });
+    } else {
+      kind = "warn";
+      label =
+        git.reason === "fetch-failed"
+          ? t("updates.page.gitFetchFailed")
+          : git.reason === "no-upstream"
+            ? t("updates.page.gitNoUpstream")
+            : t("updates.page.gitComparisonFailed");
+    }
   } else if (target) {
     kind = "accent";
     label = t("updates.page.available", { target });
-  } else if (props.schedule) {
+  } else if (props.schedule?.install?.kind === "package") {
     kind = "ok";
     label = t("updates.page.upToDate");
   } else {
@@ -127,14 +304,28 @@ function renderScheduleStatus(props: UpdatesViewProps): TemplateResult {
   }
   const countdown = campaign?.state === "waiting-for-idle" || campaign?.state === "countdown";
   return html`<span role=${countdown ? "timer" : nothing} aria-live=${countdown ? "off" : nothing}
-    >${renderSettingsStatus({ kind, label })}</span
+    >${renderSettingsStatus({ kind, label, dot: false })}</span
   >`;
 }
 
 function readGitCommits(props: UpdatesViewProps) {
   const update = props.updateAvailable;
   const gitUpdate = props.schedule?.target?.kind === "git" || Boolean(update?.currentSha);
-  return gitUpdate ? (update?.commits ?? []) : [];
+  const comparedBehind = props.schedule?.install?.git;
+  if (
+    comparedBehind &&
+    comparedBehind.status !== "behind" &&
+    comparedBehind.status !== "diverged"
+  ) {
+    return [];
+  }
+  const comparedBehindCount =
+    comparedBehind?.status === "behind" || comparedBehind?.status === "diverged"
+      ? comparedBehind.commitsBehind
+      : undefined;
+  const commitsMatch =
+    comparedBehindCount === undefined || comparedBehindCount === update?.commitsBehind;
+  return gitUpdate && commitsMatch ? (update?.commits ?? []) : [];
 }
 
 function renderCommitList(props: UpdatesViewProps) {
@@ -221,6 +412,7 @@ export function renderUpdates(props: UpdatesViewProps): TemplateResult {
             ? html`<div class="callout warning" role="note">${t("updates.adminRequired")}</div>`
             : nothing,
           renderBuildFacts(props),
+          renderRecordedAttempt(props),
           renderSettingsSection({ title: t("updates.page.policyTitle") }, policyRows),
           renderSettingsSection({ title: t("updates.page.statusTitle") }, [
             renderSettingsRow({
@@ -261,6 +453,11 @@ export function renderUpdates(props: UpdatesViewProps): TemplateResult {
               `,
             }),
           ]),
+          html`<p class="settings-page__hint">
+            <a href="https://docs.openclaw.ai/install/update-troubleshooting" target="_blank"
+              >${t("updates.page.troubleshoot")}</a
+            >
+          </p>`,
         ],
         { intro: t("updates.page.intro") },
       )}

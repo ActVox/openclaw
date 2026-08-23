@@ -1,4 +1,6 @@
-export type PracticePackStatus = "draft" | "active" | "deprecated";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+
+type PracticePackStatus = "draft" | "active" | "deprecated";
 
 export interface PracticePackSpec {
   id: string;
@@ -22,7 +24,7 @@ export interface PracticePackSpec {
   };
 }
 
-export interface PracticePackScenario {
+interface PracticePackScenario {
   id: string;
   title: string;
   input: string;
@@ -30,7 +32,7 @@ export interface PracticePackScenario {
   must_not_include?: string[];
 }
 
-export interface ValidationIssue {
+interface ValidationIssue {
   path: string;
   message: string;
 }
@@ -113,7 +115,9 @@ function validateHarness(value: unknown, issues: ValidationIssue[]): void {
   requireStringArray(value, "suites", issues, { pathPrefix: "harness", min: 1 });
 
   const scenarios = value.scenarios;
-  if (scenarios === undefined) return;
+  if (scenarios === undefined) {
+    return;
+  }
   if (!Array.isArray(scenarios)) {
     issues.push({ path: "harness.scenarios", message: "must be an array when present" });
     return;
@@ -140,7 +144,9 @@ function validateHarness(value: unknown, issues: ValidationIssue[]): void {
       requireStringArray(scenario, "must_not_include", issues, { pathPrefix: base, min: 1 });
     }
     if (typeof scenario.id === "string") {
-      if (ids.has(scenario.id)) issues.push({ path: `${base}.id`, message: "must be unique" });
+      if (ids.has(scenario.id)) {
+        issues.push({ path: `${base}.id`, message: "must be unique" });
+      }
       ids.add(scenario.id);
     }
   }
@@ -207,8 +213,4 @@ function requireRecord(
   if (!isRecord(record[key])) {
     issues.push({ path: key, message: "must be an object" });
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

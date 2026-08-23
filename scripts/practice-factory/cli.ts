@@ -13,36 +13,50 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
   if (command === "validate") {
     const spec = stringFlag(flags, "spec") ?? argv[1];
-    if (!spec) throw new Error("validate requires --spec <path>");
+    if (!spec) {
+      throw new Error("validate requires --spec <path>");
+    }
     const result = await validatePracticePackFile(spec);
     if (result.ok) {
       console.log(`practice pack valid: ${spec}`);
       return;
     }
     console.error("practice pack invalid:");
-    for (const issue of result.issues) console.error(`- ${issue.path}: ${issue.message}`);
+    for (const issue of result.issues) {
+      console.error(`- ${issue.path}: ${issue.message}`);
+    }
     process.exitCode = 1;
     return;
   }
 
   if (command === "new") {
     const spec = stringFlag(flags, "spec");
-    if (!spec) throw new Error("new requires --spec <path>");
+    if (!spec) {
+      throw new Error("new requires --spec <path>");
+    }
     const outDir = stringFlag(flags, "out-dir");
     const result = await scaffoldPracticePack({ specPath: spec, outDir });
     console.log(`practice pack scaffolded: ${result.packDir}`);
-    for (const file of result.files) console.log(`- ${file}`);
+    for (const file of result.files) {
+      console.log(`- ${file}`);
+    }
     return;
   }
 
   if (command === "proposal") {
     const spec = stringFlag(flags, "spec");
     const outDir = stringFlag(flags, "out-dir");
-    if (!spec) throw new Error("proposal requires --spec <path>");
-    if (!outDir) throw new Error("proposal requires --out-dir <path>");
+    if (!spec) {
+      throw new Error("proposal requires --spec <path>");
+    }
+    if (!outDir) {
+      throw new Error("proposal requires --out-dir <path>");
+    }
     const result = await scaffoldSkillWorkshopProposal({ specPath: spec, outDir });
     console.log(`skill workshop proposal scaffolded: ${result.proposalDir}`);
-    for (const file of result.files) console.log(`- ${file}`);
+    for (const file of result.files) {
+      console.log(`- ${file}`);
+    }
     return;
   }
 
@@ -63,14 +77,18 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   printHelp();
-  if (command && command !== "help") process.exitCode = 1;
+  if (command && command !== "help") {
+    process.exitCode = 1;
+  }
 }
 
 function parseFlags(args: string[]): Record<string, string | boolean> {
   const flags: Record<string, string | boolean> = {};
   for (let i = 0; i < args.length; i++) {
     const token = args[i];
-    if (!token.startsWith("--")) continue;
+    if (token === undefined || !token.startsWith("--")) {
+      continue;
+    }
     const key = token.slice(2);
     const next = args[i + 1];
     if (!next || next.startsWith("--")) {
@@ -94,7 +112,7 @@ function printHelp(): void {
   );
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

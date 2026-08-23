@@ -1,7 +1,6 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import {
   runPracticePackEvals,
@@ -10,6 +9,9 @@ import {
   validatePracticePackFile,
 } from "../../scripts/practice-factory/runtime.js";
 import { validatePracticePackSpec } from "../../scripts/practice-factory/schema.js";
+import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 const validSpec = {
   id: "bateson.relationship-pattern-map",
@@ -69,7 +71,7 @@ describe("practice-factory", () => {
   });
 
   it("scaffolds a pack directory from YAML", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "practice-factory-"));
+    const dir = tempDirs.make("practice-factory-");
     const specPath = join(dir, "spec.yaml");
     await writeFile(specPath, YAML.stringify(validSpec));
 
@@ -81,6 +83,9 @@ describe("practice-factory", () => {
     });
 
     expect(result.packDir).toContain("bateson.relationship-pattern-map");
+    expect(result.files).toHaveLength(6);
+    expect(result.files).toContain(join(result.packDir, "PACK.yaml"));
+    expect(result.files.every((file) => file.length > 0)).toBe(true);
     const skill = await readFile(join(result.packDir, "SKILL.md"), "utf8");
     expect(skill).toContain("Relationship Pattern Map");
     expect(skill).toContain("content_vs_relationship_message");
@@ -92,7 +97,7 @@ describe("practice-factory", () => {
   });
 
   it("scaffolds a Skill Workshop proposal directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "practice-proposal-"));
+    const dir = tempDirs.make("practice-proposal-");
     const specPath = join(dir, "spec.yaml");
     await writeFile(specPath, YAML.stringify(validSpec));
 
@@ -101,6 +106,8 @@ describe("practice-factory", () => {
       outDir: join(dir, "proposals"),
       repoRoot: dir,
     });
+    expect(result.files).toHaveLength(5);
+    expect(result.files.every((file) => file.length > 0)).toBe(true);
     const proposal = await readFile(join(result.proposalDir, "PROPOSAL.md"), "utf8");
     expect(proposal).toContain("status: proposal");
     expect(proposal).toContain("Relationship Pattern Map");
@@ -118,7 +125,7 @@ describe("practice-factory", () => {
   });
 
   it("runs deterministic pack evals", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "practice-evals-"));
+    const dir = tempDirs.make("practice-evals-");
     const specPath = join(dir, "spec.yaml");
     await writeFile(specPath, YAML.stringify(validSpec));
     const result = await scaffoldPracticePack({

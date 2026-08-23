@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import YAML from "yaml";
 import {
   assertPracticePackSpec,
@@ -8,35 +9,31 @@ import {
   type ValidationResult,
 } from "./schema.js";
 
-export interface LoadPracticePackOptions {
-  repoRoot?: string;
-}
-
-export interface ScaffoldPracticePackOptions {
+interface ScaffoldPracticePackOptions {
   specPath: string;
   outDir?: string;
   repoRoot?: string;
 }
 
-export interface ScaffoldSkillWorkshopProposalOptions {
+interface ScaffoldSkillWorkshopProposalOptions {
   specPath: string;
   outDir: string;
   repoRoot?: string;
 }
 
-export interface PracticePackEvalIssue {
+interface PracticePackEvalIssue {
   pack: string;
   path: string;
   message: string;
 }
 
-export interface PracticePackEvalResult {
+interface PracticePackEvalResult {
   ok: boolean;
   packsChecked: number;
   issues: PracticePackEvalIssue[];
 }
 
-export async function loadPracticePackSpec(specPath: string): Promise<PracticePackSpec> {
+async function loadPracticePackSpec(specPath: string): Promise<PracticePackSpec> {
   const content = await readFile(specPath, "utf8");
   const parsed = parseStructured(content, specPath);
   return assertPracticePackSpec(parsed);
@@ -77,26 +74,25 @@ export async function scaffoldSkillWorkshopProposal(
   await mkdir(join(proposalDir, "references", "scenarios"), { recursive: true });
   await mkdir(join(proposalDir, "references", "evals"), { recursive: true });
 
-  const files = [
-    join(proposalDir, "PROPOSAL.md"),
-    join(proposalDir, "references", "pack", "PACK.yaml"),
-    join(proposalDir, "references", "scenarios", "phase1.jsonl"),
-    join(proposalDir, "references", "evals", "rubric.md"),
-    join(proposalDir, "references", "evals", "expected-output-shape.json"),
-  ];
+  const proposalPath = join(proposalDir, "PROPOSAL.md");
+  const packPath = join(proposalDir, "references", "pack", "PACK.yaml");
+  const scenariosPath = join(proposalDir, "references", "scenarios", "phase1.jsonl");
+  const rubricPath = join(proposalDir, "references", "evals", "rubric.md");
+  const expectedShapePath = join(proposalDir, "references", "evals", "expected-output-shape.json");
+  const files = [proposalPath, packPath, scenariosPath, rubricPath, expectedShapePath];
 
   await writeFile(
-    files[0],
+    proposalPath,
     renderSkill(spec).replace(
       /^---\n/mu,
       `---\nstatus: proposal\nversion: "${spec.version}"\ndate: "${new Date(0).toISOString()}"\n`,
     ),
   );
-  await writeFile(files[1], `${YAML.stringify(spec, { lineWidth: 100 })}`);
-  await writeFile(files[2], renderScenarios(spec));
-  await writeFile(files[3], renderRubric(spec));
+  await writeFile(packPath, YAML.stringify(spec, { lineWidth: 100 }));
+  await writeFile(scenariosPath, renderScenarios(spec));
+  await writeFile(rubricPath, renderRubric(spec));
   await writeFile(
-    files[4],
+    expectedShapePath,
     `${JSON.stringify({ sections: spec.output_schema.sections }, null, 2)}\n`,
   );
 
@@ -104,28 +100,27 @@ export async function scaffoldSkillWorkshopProposal(
 }
 
 async function writePackFiles(spec: PracticePackSpec, packDir: string): Promise<string[]> {
-  const files = [
-    join(packDir, "PACK.yaml"),
-    join(packDir, "SKILL.md"),
-    join(packDir, "scenarios", "phase1.jsonl"),
-    join(packDir, "evals", "rubric.md"),
-    join(packDir, "evals", "expected-output-shape.json"),
-    join(packDir, "references", "README.md"),
-  ];
+  const packPath = join(packDir, "PACK.yaml");
+  const skillPath = join(packDir, "SKILL.md");
+  const scenariosPath = join(packDir, "scenarios", "phase1.jsonl");
+  const rubricPath = join(packDir, "evals", "rubric.md");
+  const expectedShapePath = join(packDir, "evals", "expected-output-shape.json");
+  const readmePath = join(packDir, "references", "README.md");
+  const files = [packPath, skillPath, scenariosPath, rubricPath, expectedShapePath, readmePath];
 
   await mkdir(join(packDir, "scenarios"), { recursive: true });
   await mkdir(join(packDir, "evals"), { recursive: true });
   await mkdir(join(packDir, "references"), { recursive: true });
 
-  await writeFile(files[0], `${YAML.stringify(spec, { lineWidth: 100 })}`);
-  await writeFile(files[1], renderSkill(spec));
-  await writeFile(files[2], renderScenarios(spec));
-  await writeFile(files[3], renderRubric(spec));
+  await writeFile(packPath, YAML.stringify(spec, { lineWidth: 100 }));
+  await writeFile(skillPath, renderSkill(spec));
+  await writeFile(scenariosPath, renderScenarios(spec));
+  await writeFile(rubricPath, renderRubric(spec));
   await writeFile(
-    files[4],
+    expectedShapePath,
     `${JSON.stringify({ sections: spec.output_schema.sections }, null, 2)}\n`,
   );
-  await writeFile(files[5], renderReferencesReadme(spec));
+  await writeFile(readmePath, renderReferencesReadme(spec));
   return files;
 }
 
@@ -153,7 +148,7 @@ async function listPracticePackDirs(packsRoot: string): Promise<string[]> {
   return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(packsRoot, entry.name))
-    .sort((a, b) => a.localeCompare(b));
+    .toSorted((a, b) => a.localeCompare(b));
 }
 
 async function evaluatePackDir(packDir: string, issues: PracticePackEvalIssue[]): Promise<void> {
@@ -260,13 +255,11 @@ function parseJsonl(content: string): unknown[] {
     .map((line) => JSON.parse(line));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function parseStructured(content: string, sourcePath: string): unknown {
   const ext = basename(sourcePath).toLowerCase();
-  if (ext.endsWith(".json")) return JSON.parse(content);
+  if (ext.endsWith(".json")) {
+    return JSON.parse(content);
+  }
   return YAML.parse(content);
 }
 

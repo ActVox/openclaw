@@ -6,7 +6,6 @@ import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
 import { INTERNAL_SESSION_PATH_PARAM } from "../../app-route-paths.ts";
 import { pathForSession } from "../../app-session-path-builder.ts";
 import { sessionRefFromPath, type SessionPathTarget } from "../../app-session-route-paths.ts";
-import type { ApplicationContext } from "../../app/context.ts";
 import { waitForGatewayClient } from "../../app/gateway-readiness.ts";
 import type { BoardFace } from "../../lib/board/settings.ts";
 import {
@@ -15,7 +14,6 @@ import {
 } from "../../lib/sessions/catalog-key.ts";
 import {
   findUiSessionRow,
-  SESSION_COMPOSER_FOCUS_PARAM,
   SESSION_FACE_PREFERENCE_PARAM,
   SESSION_NAVIGATION_KEY_PARAM,
 } from "../../lib/sessions/route-navigation.ts";
@@ -31,6 +29,7 @@ import {
   resolveUiGlobalAliasAgentId,
 } from "../../lib/sessions/session-key.ts";
 import { draftRouteDataFromLocation, draftSearchFromLocation } from "./route-draft.ts";
+import type { SessionRouteContext as ApplicationContext } from "./route-loader-context.ts";
 import { findCachedShortSession, sessionKeyUuid } from "./route-loader-short-cache.ts";
 import {
   resolveShortSessionReference,
@@ -75,14 +74,6 @@ export type SessionChatRouteData = Omit<
   face?: BoardFace;
   kind?: "session";
 };
-
-export function locationWithoutDraft(location: RouteLocation): RouteLocation {
-  const params = new URLSearchParams(location.search);
-  params.delete("draft");
-  params.delete(SESSION_COMPOSER_FOCUS_PARAM);
-  const search = params.toString();
-  return { ...location, search: search ? `?${search}` : "" };
-}
 
 type SessionReferenceSearch = { agentId: string } & (
   | { kind: "exact"; value: string }
@@ -714,6 +705,23 @@ export async function loadChatRoute(
     ? ({ kind: "unique", session: cached.row } as const)
     : await resolveShortSessionReference(context, target, signal);
   if (resolution.kind === "not-found") {
+    // A mechanically composed literal, notably a full UUID, can match the short grammar.
+    // Only after the authoritative short lookup misses may its exact decoded key win.
+    const literalResolution = await querySessionReference(
+      context,
+      { kind: "exact", value: target.literalSessionKey, agentId: target.agentId },
+      signal,
+    );
+    if (literalResolution?.kind === "unique") {
+      const literal = resolvedSessionRouteData({
+        context,
+        location: routeLocation,
+        face,
+        row: literalResolution.session,
+        preferenceDerived,
+      });
+      return literal ?? notFound({ routeId: face });
+    }
     return notFound({ routeId: face });
   }
   if (resolution.kind === "ambiguous") {
