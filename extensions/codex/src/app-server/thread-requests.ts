@@ -437,14 +437,21 @@ export function buildCodexRuntimeThreadConfigForRun(
   if (restrictedToolSurface && configMcpServers !== undefined && !isJsonObject(configMcpServers)) {
     throw new Error("Codex restricted tool surface received invalid thread mcp_servers config");
   }
+  // Ring-zero and message-only turns must shed every thread-scoped MCP server.
+  // A normal agent tool policy is different: its userMcpServers patch has already
+  // been filtered to that agent, so keep those servers while disabling inherited
+  // account-wide MCP plus native shell/apps.
+  const disableThreadScopedMcpServers = ringZeroActive || messageOnlySourceReply;
   const restrictedToolSurfaceMcpServerNames = [
     ...(options.restrictedToolSurfaceInheritedMcpServerNames ?? []),
-    ...(isJsonObject(configMcpServers) ? Object.keys(configMcpServers) : []),
+    ...(disableThreadScopedMcpServers && isJsonObject(configMcpServers)
+      ? Object.keys(configMcpServers)
+      : []),
   ];
   // Per-thread configs deep-merge; drop server launch details before the
-  // final disabled-server patch so a delivery turn cannot retain MCP access.
+  // final disabled-server patch only for turns that forbid thread-scoped MCP.
   const restrictedRunConfig =
-    restrictedToolSurface && isJsonObject(configMcpServers)
+    disableThreadScopedMcpServers && isJsonObject(configMcpServers)
       ? { ...config, mcp_servers: {} }
       : config;
   const webSearchConfig = resolveCodexWebSearchPlan({
@@ -634,19 +641,29 @@ export async function attestCodexRestrictedToolSurfaceMcpServersDisabled(
   threadId: string,
   threadConfig: JsonObject | undefined,
   signal?: AbortSignal,
+  options: { allowActiveConfiguredServers?: boolean } = {},
 ): Promise<void> {
   const configuredServers = threadConfig?.mcp_servers;
   if (configuredServers !== undefined && !isJsonObject(configuredServers)) {
     throw new Error("Codex restricted-tool-surface thread config has invalid mcp_servers");
   }
   // Codex reports configured-but-disabled servers as inactive status rows.
-  // Match those rows to the exact per-thread deny patch instead of requiring an empty inventory.
+  // Agent-scoped per-thread servers may remain active when the restriction is a
+  // normal tool policy; ring-zero and message-only callers keep the default.
   const expectedDisabledServerNames = new Set<string>();
+  const expectedActiveServerNames = new Set<string>();
   for (const [name, serverConfig] of Object.entries(configuredServers ?? {})) {
-    if (!isJsonObject(serverConfig) || serverConfig.enabled !== false) {
+    if (!isJsonObject(serverConfig)) {
+      throw new Error(`Codex restricted-tool-surface MCP server ${name} has invalid config`);
+    }
+    if (serverConfig.enabled === false) {
+      expectedDisabledServerNames.add(name);
+      continue;
+    }
+    if (!options.allowActiveConfiguredServers) {
       throw new Error(`Codex restricted-tool-surface MCP server ${name} is not disabled`);
     }
-    expectedDisabledServerNames.add(name);
+    expectedActiveServerNames.add(name);
   }
   const response = await client.request(
     "mcpServerStatus/list",
@@ -659,11 +676,26 @@ export async function attestCodexRestrictedToolSurfaceMcpServersDisabled(
     );
   }
   const observedDisabledServerNames = new Set<string>();
+  const observedActiveServerNames = new Set<string>();
   for (const status of response.data) {
     if (!isJsonObject(status) || typeof status.name !== "string" || !isJsonObject(status.tools)) {
       throw new Error(
         "Codex mcpServerStatus/list returned an invalid restricted-tool-surface server",
       );
+    }
+    if (expectedActiveServerNames.has(status.name)) {
+      if (observedActiveServerNames.has(status.name)) {
+        throw new Error(
+          `Codex restricted-tool-surface MCP attestation returned duplicate server ${status.name}`,
+        );
+      }
+      observedActiveServerNames.add(status.name);
+      if (!isJsonObject(status.serverInfo)) {
+        throw new Error(
+          `Codex restricted-tool-surface MCP attestation found inactive allowed server ${status.name}`,
+        );
+      }
+      continue;
     }
     if (!expectedDisabledServerNames.has(status.name)) {
       throw new Error(
@@ -696,6 +728,13 @@ export async function attestCodexRestrictedToolSurfaceMcpServersDisabled(
     if (!observedDisabledServerNames.has(expectedName)) {
       throw new Error(
         `Codex restricted-tool-surface MCP attestation is missing server ${expectedName}`,
+      );
+    }
+  }
+  for (const expectedName of expectedActiveServerNames) {
+    if (!observedActiveServerNames.has(expectedName)) {
+      throw new Error(
+        `Codex restricted-tool-surface MCP attestation is missing allowed server ${expectedName}`,
       );
     }
   }
