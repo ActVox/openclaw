@@ -4,6 +4,7 @@ import {
   getOrCreateSessionMcpRuntime,
   materializeBundleMcpToolsForRun,
 } from "../../agent-bundle-mcp-tools.js";
+import { resolveCodexMcpToolOverridesForAgent } from "../../cli-runner/bundle-mcp-codex.js";
 import { filterLocalModelLeanTools } from "../../local-model-lean.js";
 import { normalizeAgentRuntimeTools } from "../../runtime-plan/tools.js";
 import { isRuntimeToolAllowed } from "../../tool-policy-match.js";
@@ -91,6 +92,13 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
       toolsAllow: params.attempt.toolsAllow,
     });
   const bundleMetadataSnapshot = params.getCurrentAttemptPluginMetadataSnapshot();
+  // A provider fallback must not widen configured Codex agent scopes. Apply the
+  // same fail-closed server overrides before the generic embedded MCP runtime
+  // discovers or connects transports.
+  const scopedMcpToolOverrides = resolveCodexMcpToolOverridesForAgent(params.attempt.config, {
+    agentId: params.sessionAgentId,
+    toolOverrides: params.attempt.toolOverrides,
+  });
   // Scoped registries are partial views; only complete snapshots can bypass bundle discovery.
   const bundleManifestRegistry =
     bundleMetadataSnapshot?.pluginIds === undefined
@@ -110,7 +118,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
         requesterSenderId: params.attempt.senderId,
         agentAccountId: params.attempt.agentAccountId,
         messageChannel: params.attempt.messageChannel ?? params.attempt.messageProvider,
-        toolOverrides: params.attempt.toolOverrides,
+        toolOverrides: scopedMcpToolOverrides,
       })
     : undefined;
   const bundleMcpRuntime = bundleMcpSessionRuntime
