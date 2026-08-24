@@ -2416,6 +2416,18 @@ describe("runCodexAppServerAttempt", () => {
       deny: ["exec", "process", "write", "edit"],
     };
     params.pluginHarnessToolPolicyRestricted = true;
+    params.config = {
+      mcp: {
+        servers: {
+          notes: {
+            transport: "stdio",
+            command: "node",
+            args: ["/opt/notes-mcp/dist/index.js"],
+            codex: { agents: ["main"], defaultToolsApprovalMode: "approve" },
+          },
+        },
+      },
+    } as unknown as EmbeddedRunAttemptParams["config"];
     const agentsGuidance = "Restricted turns keep workspace AGENTS guidance.";
     await fs.mkdir(params.workspaceDir, { recursive: true });
     await fs.writeFile(path.join(params.workspaceDir, "AGENTS.md"), agentsGuidance);
@@ -2430,7 +2442,16 @@ describe("runCodexAppServerAttempt", () => {
         return { requirements: null };
       }
       if (method === "mcpServerStatus/list") {
-        return { data: [], nextCursor: null };
+        return {
+          data: [
+            {
+              name: "notes",
+              serverInfo: { name: "notes", version: "1" },
+              tools: { get_note: { name: "get_note" } },
+            },
+          ],
+          nextCursor: null,
+        };
       }
       return undefined;
     });
@@ -2454,6 +2475,9 @@ describe("runCodexAppServerAttempt", () => {
     expect(startParams?.config?.project_doc_max_bytes).toBe(131_072);
     expect(startParams?.developerInstructions?.split(agentsGuidance)).toHaveLength(2);
     expect(startParams?.config?.["tools.update_plan.enabled"]).toBe(false);
+    expect(startParams?.config?.mcp_servers).toMatchObject({
+      notes: { command: "node", args: ["/opt/notes-mcp/dist/index.js"] },
+    });
     expect(dynamicToolNames.toSorted()).toEqual(["apply_patch", "progress_card", "read"]);
     const progressCardSpec = flattenSpecsWithNamespace(startParams?.dynamicTools ?? []).find(
       (tool) => tool.name === "progress_card",

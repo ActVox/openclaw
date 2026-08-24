@@ -164,6 +164,8 @@ export async function startCodexAttemptThread(params: {
   buildFinalConfigPatch?: Parameters<typeof startOrResumeThread>[0]["buildFinalConfigPatch"];
   nativeHookRelayGeneration?: string;
   bundleMcpThreadConfig: CodexBundleMcpThreadConfig;
+  /** Positively agent-scoped user MCP may survive ordinary restricted host policy. */
+  restrictedAgentScopedUserMcpServersEnabled?: boolean;
   /** OpenClaw owns configured MCP dynamically for this scheduled turn. */
   configuredMcpOwnershipVersion?: 1;
   nativeToolSurfaceEnabled: boolean;
@@ -477,7 +479,8 @@ export async function startCodexAttemptThread(params: {
                 userMcpServersEnabled:
                   params.configuredMcpOwnershipVersion === 1
                     ? false
-                    : params.nativeToolSurfaceEnabled,
+                    : params.nativeToolSurfaceEnabled ||
+                      params.restrictedAgentScopedUserMcpServersEnabled === true,
                 mcpServersFingerprint:
                   params.configuredMcpOwnershipVersion === 1
                     ? undefined
