@@ -1,0 +1,10 @@
+{
+  "sections": [
+    "distinction",
+    "content_message",
+    "relationship_message",
+    "boundary_check",
+    "draft_strategy",
+    "optional_draft"
+  ]
+}
