@@ -551,8 +551,31 @@ describe("getStatusSummary", () => {
     );
   });
 
+  it("summarizes only active and recently terminal tasks in user-facing status", async () => {
+    const now = Date.now();
+    const fixture = statusSummaryMocks.taskAuditFindings[0]!.task;
+    const recent = { ...fixture, taskId: "recent", createdAt: now, endedAt: now };
+    const endedAt = now - 24 * 60 * 60_000;
+    const historical = { ...fixture, taskId: "historical", createdAt: endedAt, endedAt };
+    statusSummaryMocks.inspectableTasks = [recent, historical];
+
+    await getStatusSummary();
+
+    expect(statusSummaryMocks.getInspectableTaskRegistrySummary).toHaveBeenCalledWith([recent]);
+  });
+
   it("keeps retained lost tasks out of default status audit counts", async () => {
     const cleanupAfter = Date.now() + 60_000;
+    const retainedLostTask: TaskRecord = {
+      ...statusSummaryMocks.taskAuditFindings[0]!.task,
+      taskId: "task-lost-retained",
+      task: "Retained lost",
+      status: "lost",
+      deliveryStatus: "pending",
+      endedAt: cleanupAfter - 60_000,
+      cleanupAfter,
+    };
+    statusSummaryMocks.inspectableTasks = [retainedLostTask];
     statusSummaryMocks.taskRegistrySummary = {
       ...statusSummaryMocks.taskRegistrySummary,
       total: 1,
@@ -568,27 +591,13 @@ describe("getStatusSummary", () => {
         severity: "warn",
         code: "lost",
         detail: "task lost its backing session and is retained until cleanupAfter",
-        task: {
-          taskId: "task-lost-retained",
-          runtime: "subagent",
-          ownerKey: "agent:main:main",
-          requesterSessionKey: "agent:main:main",
-          scopeKind: "session",
-          task: "Retained lost",
-          status: "lost",
-          deliveryStatus: "pending",
-          notifyPolicy: "done_only",
-          createdAt: cleanupAfter - 60_000,
-          endedAt: cleanupAfter - 60_000,
-          cleanupAfter,
-        },
+        task: retainedLostTask,
       },
     ];
 
     const summary = await getStatusSummary();
 
-    expect(summary.tasks.failures).toBe(0);
-    expect(summary.tasks.byStatus.lost).toBe(1);
+    expect(summary.tasks).toMatchObject({ failures: 0, byStatus: { lost: 1 } });
     expect(summary.taskAudit).toEqual({
       total: 0,
       warnings: 0,
@@ -602,10 +611,7 @@ describe("getStatusSummary", () => {
         inconsistent_timestamps: 0,
       },
     });
-    expect(summary.taskAuditRetainedLost).toEqual({
-      count: 1,
-      nextCleanupAfter: cleanupAfter,
-    });
+    expect(summary.taskAuditRetainedLost).toEqual({ count: 1, nextCleanupAfter: cleanupAfter });
   });
 
   it("skips channel summary imports when no channels are configured", async () => {
