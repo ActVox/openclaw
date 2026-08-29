@@ -467,6 +467,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       to: "123456",
       payloads: [{ text: "Fallback cron summary." }],
       deliveryIntentId: expect.stringContaining("cron-direct-delivery:v1:"),
+      replyPayloadSendingHook: expect.objectContaining({ sessionKey: "agent:main:cron:test-job" }),
     });
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(true);
@@ -481,7 +482,6 @@ describe("dispatchCronDelivery — double-announce guard", () => {
 
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(false);
-    expect(state.deliverySuppressionReason).toBe("channel_transform");
     expect(state.deliverySuppressionReason).toBe("channel_transform");
     expect(maybeApplyTtsToPayloadMock).not.toHaveBeenCalled();
     expect(deliverOutboundPayloads).not.toHaveBeenCalled();

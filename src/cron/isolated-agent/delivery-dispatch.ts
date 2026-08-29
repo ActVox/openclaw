@@ -75,12 +75,12 @@ export async function dispatchCronDelivery(
 ): Promise<DispatchCronDeliveryState> {
   const sourceDeliverySatisfied = params.sourceDeliveryOutcome.satisfiesSourceDelivery;
   const requiresCurrentSessionCompletion = params.job.sessionTarget === "current";
-  const verifiedMessageToolDelivery = params.sourceDeliveryOutcome.verifiedMessageToolDelivery;
   let summary = params.summary;
   let outputText = params.outputText;
   let synthesizedText = params.synthesizedText;
   let deliveryPayloads = params.deliveryPayloads;
 
+  const verifiedMessageToolDelivery = params.sourceDeliveryOutcome.verifiedMessageToolDelivery;
   const deliveryState: CronResolvedDeliveryState = {
     status: params.deliveryRequested ? "not-delivered" : "not-requested",
     delivered: false,
@@ -169,6 +169,7 @@ export async function dispatchCronDelivery(
     delivery: SuccessfulCronDeliveryTarget,
   ): Promise<CronDeliveryDisposition | null> => {
     const {
+      buildCronReplyHook,
       buildOutboundSessionContext,
       createOutboundSendDeps,
       durableMessageBatchMayHaveReachedRecipient,
@@ -326,6 +327,7 @@ export async function dispatchCronDelivery(
           accountId: delivery.accountId,
           threadId: delivery.threadId,
           payloads: linkedPayloadsForDelivery,
+          replyPayloadSendingHook: buildCronReplyHook(delivery, params.agentSessionKey),
           session: deliverySession,
           identity,
           bestEffort: params.deliveryBestEffort,
