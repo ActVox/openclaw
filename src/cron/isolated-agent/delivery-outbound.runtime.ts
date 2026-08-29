@@ -15,6 +15,23 @@ export { resolveAgentOutboundIdentity } from "../../infra/outbound/identity.js";
 export { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
 export { enqueueSystemEvent } from "../../infra/system-events.js";
 
+export function buildCronReplyHook(
+  delivery: { channel: string; accountId?: string; to: string },
+  sessionKey: string,
+) {
+  return {
+    kind: "final" as const,
+    channel: delivery.channel,
+    sessionKey,
+    context: {
+      channelId: delivery.channel,
+      ...(delivery.accountId ? { accountId: delivery.accountId } : {}),
+      conversationId: delivery.to,
+      sessionKey,
+    },
+  };
+}
+
 export function resolveCronChannelReplyTransform(params: {
   channel: string;
   cfg: OpenClawConfig;
