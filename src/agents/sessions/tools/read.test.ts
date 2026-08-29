@@ -813,7 +813,7 @@ describe("read tool", () => {
     }
   });
 
-  it("leaves injected read operation decoding owner-controlled", async () => {
+  it("rejects undecodable bytes from injected read operations", async () => {
     const bytes = Buffer.from([0xc4, 0xe3, 0xba, 0xc3]);
     const tool = createReadToolDefinition("/workspace", {
       operations: {
@@ -822,16 +822,11 @@ describe("read tool", () => {
         readFile: async () => bytes,
       },
     });
-    const result = await tool.execute(
-      "call-1",
-      { path: "legacy.txt" },
-      undefined,
-      undefined,
-      {} as never,
-    );
 
+    await expect(
+      tool.execute("call-1", { path: "legacy.txt" }, undefined, undefined, {} as never),
+    ).rejects.toThrow(/binary content.*text and image files/i);
     expect(decodeWindowsTextFileBufferMock).not.toHaveBeenCalled();
-    expect(textContent(result)).toBe(bytes.toString("utf8"));
   });
 
   it("strips one leading UTF-8 BOM without changing embedded markers", async () => {
