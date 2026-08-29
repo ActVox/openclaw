@@ -41,6 +41,7 @@ import {
 } from "./config-reload-plan.js";
 import { resolveGatewayReloadSettings } from "./config-reload-settings.js";
 import type { GatewayHotReloadStatus } from "./config-reload-status.types.js";
+import { GatewayConfigReloadSupersededError } from "./server-reload-contracts.js";
 
 export type { GatewayReloadPlan } from "./config-reload-plan.js";
 const MISSING_CONFIG_RETRY_DELAY_MS = 150;
@@ -125,17 +126,6 @@ type PreparedGatewayConfigCandidate = {
   reapplyCompareOverlays?: (config: OpenClawConfig) => OpenClawConfig;
 };
 
-class GatewayConfigReloadSupersededError extends Error {
-  constructor() {
-    super("config reload superseded by a newer config write");
-    this.name = "GatewayConfigReloadSupersededError";
-  }
-}
-
-function isGatewayConfigReloadSupersededError(error: unknown): boolean {
-  return error instanceof Error && error.name === "GatewayConfigReloadSupersededError";
-}
-
 function asPluginInstallConfig(records: PluginInstallRecords): OpenClawConfig {
   return {
     plugins: {
@@ -168,6 +158,8 @@ export function startGatewayConfigReloader(opts: {
   onConfigChange?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
   /** Publishes runtime state after a hot or no-op config transaction. */
   onConfigApplied?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
+  /** Runs synchronously when a config transaction publishes its runtime state. */
+  onRuntimeConfigCommitted?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void;
   /** Publishes the resolved source-config revision accepted by the active runtime. */
   onConfigRevisionApplied?: (hash: string) => void;
   /** Retires rejected lifecycle work after any newer config transaction is accepted. */
@@ -409,7 +401,7 @@ export function startGatewayConfigReloader(opts: {
       // transaction. Only downstream signal delivery may coalesce.
       await opts.onRestart(plan, nextConfig, ownership, sourceConfig);
     } catch (err) {
-      if (isGatewayConfigReloadSupersededError(err)) {
+      if (err instanceof GatewayConfigReloadSupersededError) {
         opts.log.info(`config restart superseded: ${String(err)}`);
       } else {
         opts.log.error(`config restart failed: ${String(err)}`);
@@ -509,6 +501,7 @@ export function startGatewayConfigReloader(opts: {
         // transaction. Advance the runtime diff baseline at that exact edge so
         // the newer disk config plans the reverse work instead of diffing stale state.
         commitPublishedRuntimeEnv();
+        opts.onRuntimeConfigCommitted?.(plan, runtimeConfig);
         committedRuntimeConfig = runtimeConfig;
         currentConfig = runtimeConfig;
         currentCompareConfig = nextCompareConfig;
@@ -1067,7 +1060,8 @@ export function startGatewayConfigReloader(opts: {
       });
       await acceptWatchedPaths(snapshot.includedPaths ?? []);
     } catch (err) {
-      if (isGatewayConfigReloadSupersededError(err)) {
+      const superseded = err instanceof GatewayConfigReloadSupersededError;
+      if (superseded) {
         opts.log.info(`config reload superseded: ${String(err)}`);
       } else {
         opts.log.error(`config reload failed: ${String(err)}`);

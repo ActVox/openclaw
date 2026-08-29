@@ -12,6 +12,7 @@ import {
   type resolveSandboxContext,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { sleepWithAbort } from "openclaw/plugin-sdk/runtime-env";
 import {
   CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
   CodexAppServerUnsafeSubscriptionError,
@@ -76,6 +77,7 @@ import {
   clearSharedCodexAppServerClientIfCurrentAndUnclaimed,
   createIsolatedCodexAppServerClient,
   isCodexAppServerStartSelectionChangedError,
+  readCodexAppServerClientDesktopGenerationFingerprint,
   releaseLeasedSharedCodexAppServerClient,
   retireSharedCodexAppServerClientIfCurrent,
   type CodexAppServerClientOptions,
@@ -93,7 +95,7 @@ import {
 } from "./turn-router.js";
 import type { CodexNativeWebSearchSupport } from "./web-search.js";
 
-const CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS = 3;
+const CODEX_APP_SERVER_STARTUP_MAX_ATTEMPTS = 3;
 const CODEX_APP_SERVER_CONTEXT_RESTART_SELECTION_CHANGED =
   "CODEX_APP_SERVER_CONTEXT_RESTART_SELECTION_CHANGED";
 
@@ -163,6 +165,7 @@ export async function startCodexAttemptThread(params: {
   finalConfigPatch?: Parameters<typeof startOrResumeThread>[0]["finalConfigPatch"];
   buildFinalConfigPatch?: Parameters<typeof startOrResumeThread>[0]["buildFinalConfigPatch"];
   nativeHookRelayGeneration?: string;
+  nativeHookRelayRequired?: boolean;
   bundleMcpThreadConfig: CodexBundleMcpThreadConfig;
   /** Positively agent-scoped user MCP may survive ordinary restricted host policy. */
   restrictedAgentScopedUserMcpServersEnabled?: boolean;
@@ -319,7 +322,10 @@ export async function startCodexAttemptThread(params: {
                 signal: startupAbandonController.signal,
               });
             } catch (error) {
-              if (startupAbandonController.signal.aborted) {
+              if (
+                startupAbandonController.signal.aborted ||
+                isCodexAppServerStartSelectionChangedError(error)
+              ) {
                 throw error;
               }
               throw new AgentHarnessPreflightError(
@@ -336,6 +342,8 @@ export async function startCodexAttemptThread(params: {
               envApiKeyFingerprint: params.startupEnvApiKeyCacheKey,
               appServerVersion: activeStartupClient.getServerVersion(),
               runtimeIdentity: startupRuntimeIdentity,
+              desktopGenerationFingerprint:
+                readCodexAppServerClientDesktopGenerationFingerprint(activeStartupClient),
             });
             const appServerRuntimeFingerprint = buildCodexAppServerRuntimeFingerprint({
               appServer: params.appServer,
@@ -473,6 +481,7 @@ export async function startCodexAttemptThread(params: {
                 finalConfigPatch: params.finalConfigPatch,
                 buildFinalConfigPatch: params.buildFinalConfigPatch,
                 nativeHookRelayGeneration: params.nativeHookRelayGeneration,
+                nativeHookRelayRequired: params.nativeHookRelayRequired,
                 nativeCodeModeEnabled: params.nativeToolSurfaceEnabled,
                 nativeProviderWebSearchSupport: params.nativeProviderWebSearchSupport,
                 nativeCodeModeOnlyEnabled: params.appServer.codeModeOnly,
@@ -620,11 +629,7 @@ export async function startCodexAttemptThread(params: {
           }
         };
 
-        for (
-          let attempt = 1;
-          attempt <= CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS;
-          attempt += 1
-        ) {
+        for (let attempt = 1; attempt <= CODEX_APP_SERVER_STARTUP_MAX_ATTEMPTS; attempt += 1) {
           try {
             return await startupAttempt();
           } catch (error) {
@@ -636,27 +641,27 @@ export async function startCodexAttemptThread(params: {
             ) {
               throw error;
             }
-            const failedClient = attemptedClient;
             const refreshedSharedClient = selectionChanged
-              ? retireSharedCodexAppServerClientIfCurrent(failedClient)
-              : clearSharedCodexAppServerClientIfCurrent(failedClient);
-            if (startupClientForAbandonedRequestCleanup === failedClient) {
+              ? retireSharedCodexAppServerClientIfCurrent(attemptedClient)
+              : clearSharedCodexAppServerClientIfCurrent(attemptedClient);
+            if (startupClientForAbandonedRequestCleanup === attemptedClient) {
               startupClientForAbandonedRequestCleanup = undefined;
             }
-            if (attempt >= CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS) {
+            if (attempt >= CODEX_APP_SERVER_STARTUP_MAX_ATTEMPTS) {
               embeddedAgentLog.warn(
                 selectionChanged
                   ? "codex app-server executable selection kept changing during startup; retries exhausted"
                   : "codex app-server connection closed during startup; retries exhausted",
                 {
                   attempt,
-                  maxAttempts: CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS,
+                  maxAttempts: CODEX_APP_SERVER_STARTUP_MAX_ATTEMPTS,
                   refreshedSharedClient,
                   error: formatErrorMessage(error),
                 },
               );
               throw error;
             }
+            const retryDelayMs = selectionChanged ? 0 : 1_000 * 2 ** (attempt - 1);
             embeddedAgentLog.warn(
               selectionChanged
                 ? "codex app-server executable selection changed during startup; restarting app-server and retrying"
@@ -664,11 +669,14 @@ export async function startCodexAttemptThread(params: {
               {
                 attempt,
                 nextAttempt: attempt + 1,
-                maxAttempts: CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS,
+                maxAttempts: CODEX_APP_SERVER_STARTUP_MAX_ATTEMPTS,
                 refreshedSharedClient,
                 error: formatErrorMessage(error),
               },
             );
+            // Codex exits after its five-second SQLite busy timeout; a bounded,
+            // abortable backoff avoids immediately racing the same transient lock.
+            await sleepWithAbort(retryDelayMs, startupAbandonController.signal);
           }
         }
         throw new Error("codex app-server startup retry loop exited unexpectedly");

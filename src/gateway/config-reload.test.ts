@@ -40,6 +40,7 @@ import {
   type GatewayReloadPlan,
   startGatewayConfigReloader,
 } from "./config-reload.js";
+import { GatewayConfigReloadSupersededError } from "./server-reload-contracts.js";
 import { createTerminalLaunchPolicy } from "./terminal/launch.js";
 
 const configAuditMocks = vi.hoisted(() => ({
@@ -380,6 +381,7 @@ describe("buildGatewayReloadPlan", () => {
     "plugins.load.paths.0",
     "gateway.auth.mode",
     "secrets.egressProxy.enabled",
+    "secrets.egressProxy.allowedHosts",
     "secrets.egressProxy.bypassHosts",
   ])("keeps restart-owned path restart-backed: %s", (path) => {
     const plan = buildGatewayReloadPlan([path]);
@@ -434,6 +436,19 @@ describe("buildGatewayReloadPlan", () => {
       noopPaths: [],
       ...expected,
     });
+  });
+
+  it("hot reloads Skill Workshop autonomous mode changes", () => {
+    const path = "skills.workshop.autonomous.mode";
+    const plan = buildGatewayReloadPlan([path]);
+
+    expect(plan).toMatchObject({
+      restartGateway: false,
+      hotReasons: [path],
+      noopPaths: [],
+      reconcileSkillReviewJobs: true,
+    });
+    expect(isNoopGatewayReloadPlan(plan)).toBe(false);
   });
 
   it.each([
@@ -2977,9 +2992,7 @@ describe("startGatewayConfigReloader", () => {
     });
     const readSnapshot = vi.fn<() => Promise<ConfigFileSnapshot>>().mockResolvedValue(snapshot);
     const { watcher, onRestart, log, reloader } = createReloaderHarness(readSnapshot);
-    const superseded = new Error("config reload superseded by a newer runtime config source");
-    superseded.name = "GatewayConfigReloadSupersededError";
-    onRestart.mockRejectedValueOnce(superseded);
+    onRestart.mockRejectedValueOnce(new GatewayConfigReloadSupersededError());
 
     watcher.emit("change");
     await vi.runAllTimersAsync();

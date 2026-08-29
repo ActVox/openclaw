@@ -263,12 +263,9 @@ export async function resumeExistingCodexThread(
             response.thread.id,
             resumeParams.config,
             params.signal,
-            {
-              allowActiveConfiguredServers:
-                params.params.pluginHarnessToolPolicyRestricted === true &&
-                !ringZeroActive &&
-                !isMessageOnlyCodexSourceReply(params.params),
-            },
+            params.params.pluginHarnessToolPolicyRestricted === true &&
+              !ringZeroActive &&
+              !isMessageOnlyCodexSourceReply(params.params),
           ),
         );
       } catch (error) {
@@ -565,12 +562,9 @@ export async function startFreshCodexThread(
           response.thread.id,
           startParams.config,
           params.signal,
-          {
-            allowActiveConfiguredServers:
-              params.params.pluginHarnessToolPolicyRestricted === true &&
-              !ringZeroActive &&
-              !isMessageOnlyCodexSourceReply(params.params),
-          },
+          params.params.pluginHarnessToolPolicyRestricted === true &&
+            !ringZeroActive &&
+            !isMessageOnlyCodexSourceReply(params.params),
         ),
       );
     } catch (error) {

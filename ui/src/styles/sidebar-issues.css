@@ -6,8 +6,8 @@
     500px,
     calc(
       100dvh -
-        max(var(--sidebar-issues-panel-bottom, 8px), calc(8px + env(safe-area-inset-bottom, 0px))) -
-        8px - env(safe-area-inset-top, 0px)
+        max(var(--sidebar-issues-panel-top, 8px), calc(8px + env(safe-area-inset-top, 0px))) -
+        max(var(--sidebar-issues-panel-bottom, 8px), calc(8px + env(safe-area-inset-bottom, 0px)))
     )
   );
   display: flex;
@@ -106,6 +106,17 @@
   height: 16px;
 }
 
+.sidebar-issues-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+
+.sidebar-issues-panel__dismiss-shown {
+  min-height: 28px;
+}
+
 .sidebar-issues-panel__ask {
   flex: 0 0 32px;
 }
@@ -147,67 +158,36 @@
   scroll-padding-block-end: 58px;
 }
 
+.shell--mobile-nav .sidebar-issues-panel__dismiss {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+}
+
+.shell--mobile-nav .sidebar-issues-panel__dismiss-shown {
+  min-height: 40px;
+}
+
+/* Hub-tab strip (shared hub-tabs.css owns the tab look); this block only
+   places it in the popover: the track hairline doubles as the header/list
+   separator, so it must span the full panel width. */
 .sidebar-issues-panel__tabs {
   display: block;
   flex: none;
   overflow: hidden;
-  border-block-end: 1px solid var(--border);
   background: var(--secondary);
-  --indicator-color: transparent;
-  --track-color: transparent;
-  --track-width: 0;
 }
 
 .sidebar-issues-panel__tabs::part(tabs) {
   box-sizing: border-box;
   width: 100%;
-  gap: 2px;
-  padding: 0 6px 8px;
+  padding-inline: 8px;
 }
 
-.sidebar-issues-panel__tab {
-  display: block;
-  min-width: 0;
-  flex: 1 1 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: var(--cursor-action);
-  font: inherit;
-  font-size: var(--control-ui-text-xs);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.sidebar-issues-panel__tab::part(base) {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 32px;
-  justify-content: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border-radius: var(--radius-md);
-}
-
-.sidebar-issues-panel__tab:hover::part(base) {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.sidebar-issues-panel__tab:is([active], [aria-selected="true"])::part(base) {
-  background: color-mix(in srgb, var(--bg-hover) 92%, var(--text) 8%);
-  color: var(--text-strong);
-}
-
-.sidebar-issues-panel__tab:focus-visible::part(base) {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.sidebar-issues-panel__tab-count {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
+.sidebar-issues-panel__tabs wa-tab.hub-tab::part(base) {
+  /* Popover tabs are tap targets (mobile sheet); keep a taller hit area than
+     the page-hub sub tabs. */
+  padding-block: 6px 9px;
 }
 
 .sidebar-issues-panel__list-wrap {
@@ -500,6 +480,10 @@
   color: var(--danger);
 }
 
+.sidebar-issues-panel__details[data-attention-kind="scopeUpgrade"] .sidebar-issues-panel__icon {
+  color: var(--warn);
+}
+
 .sidebar-issues-panel__dismiss {
   display: inline-grid;
   width: 24px;
@@ -512,10 +496,7 @@
   background: transparent;
   color: var(--muted);
   cursor: var(--cursor-action);
-  opacity: 0;
-  pointer-events: none;
   transition:
-    opacity var(--duration-fast) ease,
     background var(--duration-fast) ease,
     color var(--duration-fast) ease;
 }
@@ -525,17 +506,7 @@
   height: 14px;
 }
 
-.sidebar-issues-panel__summary:focus-within .sidebar-issues-panel__dismiss {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 @media (hover: hover) {
-  .sidebar-issues-panel__summary:hover .sidebar-issues-panel__dismiss {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
   .sidebar-issues-panel__dismiss:hover {
     background: var(--bg-hover);
     color: var(--text-strong);
@@ -761,10 +732,4 @@
 
 .sidebar-approval-row__message--error {
   color: var(--danger);
-}
-
-.exec-approval-description {
-  overflow-wrap: anywhere;
-  color: var(--muted-strong);
-  line-height: 1.4;
 }

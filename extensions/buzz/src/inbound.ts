@@ -23,6 +23,7 @@ export async function handleBuzzInbound(params: {
   bus: BuzzBus;
   message: BuzzInboundMessage;
   signal: AbortSignal;
+  assertCurrent: () => void;
   buildContext?: typeof buildChannelInboundEventContext;
 }) {
   const runtime = getBuzzRuntime();
@@ -67,8 +68,8 @@ export async function handleBuzzInbound(params: {
       inboundEventKind: "user_request",
     },
     mentionFacts: { canDetectMention: true, wasMentioned },
-    groupPolicy: account.config.groupPolicy,
-    groupAllowFrom: account.config.groupAllowFrom,
+    groupPolicy: groupConfig?.groupPolicy ?? account.config.groupPolicy,
+    groupAllowFrom: groupConfig?.groupAllowFrom ?? account.config.groupAllowFrom,
     policy: {
       activation: {
         requireMention: groupConfig?.requireMention ?? true,
@@ -82,6 +83,8 @@ export async function handleBuzzInbound(params: {
         }
       : undefined,
   });
+  // Admission awaits policy; only the transport owner can confirm membership is still current.
+  params.assertCurrent();
   if (access.ingress.admission !== "dispatch") {
     return;
   }
@@ -138,6 +141,11 @@ export async function handleBuzzInbound(params: {
       BuzzEventKind: message.kind,
     },
   });
+  const replyTarget = {
+    channelId,
+    threadId: message.threadId,
+    replyToId: message.threadId ?? message.id,
+  };
 
   await runtime.channel.inbound.dispatch({
     cfg,
@@ -158,12 +166,7 @@ export async function handleBuzzInbound(params: {
         if (!text.trim()) {
           return;
         }
-        await bus.sendText({
-          channelId,
-          text,
-          threadId: message.threadId,
-          replyToId: message.id,
-        });
+        await bus.sendText({ ...replyTarget, text });
       },
       onError: (error) => {
         throw error instanceof Error ? error : new Error(String(error));
@@ -175,11 +178,7 @@ export async function handleBuzzInbound(params: {
     replyPipeline: {
       typing: {
         start: async () => {
-          await bus.sendTyping({
-            channelId,
-            threadId: message.threadId,
-            replyToId: message.id,
-          });
+          await bus.sendTyping(replyTarget);
         },
         keepaliveIntervalMs: 3_000,
         onStartError: (error: unknown) => {

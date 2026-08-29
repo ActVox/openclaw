@@ -5,7 +5,7 @@ import {
   type NavigationRouteId,
   type SidebarZoneEntry,
 } from "../app-navigation.ts";
-import { isRouteId, isSessionRouteId, pathForRoute } from "../app-route-paths.ts";
+import { activityPersonLocation, isRouteId, isSessionRouteId } from "../app-route-paths.ts";
 import { resolveControlUiAuthToken } from "../app/control-ui-auth.ts";
 import { isNativeWebChromeHost } from "../app/native-web-chrome.ts";
 import { readPresenceEntries, resolveCurrentSelfUser } from "../app/user-profile.ts";
@@ -37,13 +37,14 @@ import { renderSidebarSessionSectionHeader } from "./app-sidebar-session-section
 import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
 import type { SidebarWorkboardBoard } from "./app-sidebar-workboard.ts";
 import { icons } from "./icons.ts";
+import { redactLoginFailureError } from "./login-gate.ts";
 import {
   renderSessionAttentionIcon,
   renderSessionRunSpinner,
   sessionAttentionSubtitle,
 } from "./session-attention-presentation.ts";
 import { renderSessionGlyph, renderSessionUnreadBadge } from "./session-glyph.ts";
-import { renderSessionRowBadges } from "./session-row-badges.ts";
+import { renderSessionRowBadges, renderSidebarConnectionStatus } from "./session-row-badges.ts";
 import { formatSidebarBuildSubtitle } from "./sidebar-build-chip-format.ts";
 
 type AppSidebarRenderHost = AppSidebarSessionNavigationElement & {
@@ -315,14 +316,13 @@ export function renderAppSidebarOnline(host: AppSidebarRenderHost) {
         ? nothing
         : html`<div class="sidebar-online__list">
             ${users.map((user) => {
-              const pathname = pathForRoute("activity", host.basePath);
-              const search = `?${new URLSearchParams({ person: user.id }).toString()}`;
+              const { pathname, search, href } = activityPersonLocation(user.id, host.basePath);
               return html`<a
                 class="sidebar-online__person ${isPresenceViewerIdle(user)
                   ? "sidebar-online__person--away"
                   : ""}"
                 data-online-user-id=${user.id}
-                href=${`${pathname}${search}`}
+                href=${href}
                 @click=${(event: MouseEvent) => {
                   if (!shouldHandleNavigationClick(event)) {
                     return;
@@ -381,36 +381,18 @@ export function renderAppSidebarFooterBar(host: AppSidebarRenderHost) {
         <openclaw-viewer-avatar .user=${avatarUser} variant="footer"></openclaw-viewer-avatar>
         <span class="sidebar-identity-card__text">
           <span class="sidebar-identity-card__name" title=${selfLabel}>${selfLabel}</span>
-          ${host.offline
-            ? html`<span class="sidebar-identity-card__subtitle sr-only" aria-hidden="true"
-                >${t("connection.reconnecting")}</span
-              >`
-            : gateway
-              ? html`<span
-                  class="sidebar-identity-card__subtitle sidebar-identity-card__subtitle--gateway sr-only"
-                  aria-hidden="true"
-                >
-                  <span
-                    class="sidebar-identity-card__gateway-health"
-                    data-health=${gateway.health}
-                  ></span>
-                  <span class="sidebar-identity-card__gateway-name">${gateway.name}</span>
-                  ${gatewayPrimaryTag
-                    ? html`<span class="sidebar-identity-card__gateway-primary"
-                        >· ${gatewayPrimaryTag}</span
-                      >`
-                    : nothing}
-                </span>`
-              : buildSubtitle
-                ? html`<span class="sidebar-identity-card__subtitle sr-only" aria-hidden="true"
-                    >${buildSubtitle}</span
-                  >`
-                : nothing}
         </span>
       </button>
-      <span class="sidebar-identity-card__status" role="status" aria-live="polite"
-        >${host.offline ? t("connection.reconnecting") : ""}</span
-      >
+      ${host.restartPending || host.offline
+        ? renderSidebarConnectionStatus({
+            kind: host.restartPending ? "restarting" : "offline",
+            queuedOutboxCount: host.queuedOutboxCount,
+            title: host.lastError
+              ? redactLoginFailureError(host.lastError)
+              : t("connection.reconnecting"),
+            onRetry: () => host.onRetryConnect?.(),
+          })
+        : nothing}
       <span class="sidebar-footer-actions">${renderAppSidebarAttention(host)}</span>
     </div>
   `;

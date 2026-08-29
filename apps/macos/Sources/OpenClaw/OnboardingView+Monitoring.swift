@@ -94,8 +94,24 @@ extension OnboardingView {
         }
     }
 
+    static func shouldResolveInstallPromptForRunningGateway(
+        gatewayStatus: GatewayProcessManager.Status,
+        isLocal: Bool,
+        phase: CLIInstallPhase) -> Bool
+    {
+        guard isLocal, phase == .choosingTarget else { return false }
+        return switch gatewayStatus {
+        case .running, .attachedExisting: true
+        case .stopped, .starting, .failed: false
+        }
+    }
+
     func reviseCLIActivationFailureIfGatewayReady(_ status: GatewayProcessManager.Status) {
-        guard Self.shouldReviseCLIActivationFailure(
+        let resolvesInstallPrompt = Self.shouldResolveInstallPromptForRunningGateway(
+            gatewayStatus: status,
+            isLocal: state.connectionMode == .local,
+            phase: cliInstallPhase)
+        guard resolvesInstallPrompt || Self.shouldReviseCLIActivationFailure(
             gatewayStatus: status,
             isLocal: state.connectionMode == .local,
             executableReady: cliExecutableReady,
@@ -104,6 +120,10 @@ extension OnboardingView {
         cliInstalled = true
         cliStatusKnown = true
         cliStatus = nil
+        if resolvesInstallPrompt {
+            // A running local gateway already fulfills the pending install prompt.
+            OnboardingController.shared.dismissAttachedSheet()
+        }
     }
 
     /// LocalGatewayActivation.failed carries the reason bound to that specific activation
@@ -128,18 +148,23 @@ extension OnboardingView {
             return
         }
 
+        (cliInstalled, cliStatus) = Self.localGatewayActivationOutcome(result, afterFreshInstall: false)
+    }
+
+    static func localGatewayActivationOutcome(
+        _ result: CLIInstaller.LocalGatewayActivation,
+        afterFreshInstall: Bool) -> (ready: Bool, status: String)
+    {
         switch result {
         case .ready:
-            cliInstalled = true
-            cliStatus = "OpenClaw Gateway is ready."
+            (true, "OpenClaw Gateway is ready.")
         case .deferred:
-            cliInstalled = false
-            cliStatus = "OpenClaw is paused. Resume it, then retry setup to start the Gateway."
+            (false, "OpenClaw is paused. Resume it, then retry setup to start the Gateway.")
         case let .failed(reason):
-            cliInstalled = false
-            cliStatus = Self.gatewayStartFailureMessage(
-                prefix: "OpenClaw is installed, but the Gateway did not start. Retry setup.",
-                reason: reason)
+            (false, Self.gatewayStartFailureMessage(
+                prefix: "OpenClaw \(afterFreshInstall ? "was" : "is") installed, " +
+                    "but the Gateway did not start. Retry setup.",
+                reason: reason))
         }
     }
 
@@ -167,6 +192,8 @@ extension OnboardingView {
         guard let target = await CLIInstallPrompter.shared.installTargetForCurrentBuild(
             presentingSheetOn: OnboardingController.shared.sheetPresentationWindow)
         else {
+            // Gateway readiness can resolve onboarding while this sheet is open.
+            guard !cliInstalled else { return }
             cliStatus = "CLI installation cancelled."
             return
         }
@@ -189,18 +216,9 @@ extension OnboardingView {
         // The step checklist shows one spinner at a time: install first,
         // then the service start.
         self.cliInstallPhase = .startingService
-        switch await CLIInstaller.activateLocalGateway() {
-        case .ready:
-            cliStatus = "OpenClaw Gateway is ready."
-        case .deferred:
-            cliStatus = "OpenClaw is installed. The Gateway will start when This Mac is active and resumed."
-        case let .failed(reason):
-            cliStatus = Self.gatewayStartFailureMessage(
-                prefix: "OpenClaw was installed, but the Gateway did not start. Retry setup.",
-                reason: reason)
-            return
-        }
-        cliInstalled = true
+        (cliInstalled, cliStatus) = await Self.localGatewayActivationOutcome(
+            CLIInstaller.activateLocalGateway(),
+            afterFreshInstall: true)
     }
 
     func refreshCLIStatus() async {
