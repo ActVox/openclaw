@@ -33,6 +33,7 @@ import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import { normalizePositiveLimit } from "./limits.js";
 import { getReadPathVariants, resolveToCwd } from "./path-utils.js";
+import { decodeReadableTextBuffer } from "./read-content-guard.js";
 import {
   createReadToolDetails,
   readToolInputSchema,
@@ -579,10 +580,15 @@ export function createReadToolDefinition(
                 }
               }
             } else {
-              const decodedText =
-                ops.decodeText?.({ buffer, absolutePath }) ?? buffer.toString("utf8");
+              const usesCustomDecoder = options?.operations?.decodeText !== undefined;
               const textContent = (
-                decodedText.startsWith("\uFEFF") ? decodedText.slice(1) : decodedText
+                await decodeReadableTextBuffer({
+                  buffer,
+                  filePath: absolutePath,
+                  decodeText: () =>
+                    ops.decodeText?.({ buffer, absolutePath }) ?? buffer.toString("utf8"),
+                  usesCustomDecoder,
+                })
               ).replaceAll("\r\n", "\n");
               const allLines = textContent.split("\n");
               if (allLines.at(-1) === "") {
