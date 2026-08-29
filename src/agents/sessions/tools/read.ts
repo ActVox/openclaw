@@ -41,6 +41,7 @@ import {
   resolveLocalPathToCwd,
   resolveToCwd,
 } from "./path-utils.js";
+import { decodeReadableTextBuffer } from "./read-content-guard.js";
 import { createBoundedReadTextPage } from "./read-page.js";
 import {
   createReadToolDetails,
@@ -514,10 +515,15 @@ export function createReadToolDefinition(
                 }
               }
             } else {
-              const decodedText =
-                ops.decodeText?.({ buffer, absolutePath }) ?? buffer.toString("utf8");
+              const usesCustomDecoder = options?.operations?.decodeText !== undefined;
               const textContent = (
-                decodedText.startsWith("\uFEFF") ? decodedText.slice(1) : decodedText
+                await decodeReadableTextBuffer({
+                  buffer,
+                  filePath: absolutePath,
+                  decodeText: () =>
+                    ops.decodeText?.({ buffer, absolutePath }) ?? buffer.toString("utf8"),
+                  usesCustomDecoder,
+                })
               ).replaceAll("\r\n", "\n");
               const allLines = textContent.split("\n");
               if (allLines.at(-1) === "") {
