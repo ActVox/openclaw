@@ -44,6 +44,7 @@ export async function startCodexAttemptRuntime(resources: CodexAttemptResources)
     startupAuthAccountCacheKey,
     startupEnvApiKeyCacheKey,
     bundleMcpThreadConfig,
+    restrictedAgentScopedUserMcpServersEnabled,
     nativeToolSurfaceEnabled,
     nativeProviderWebSearchSupport,
     effectiveRuntimeModelId,
@@ -129,6 +130,7 @@ export async function startCodexAttemptRuntime(resources: CodexAttemptResources)
             Boolean(connection.sandboxSessionKey) &&
             loopDetectionEnabled)),
       bundleMcpThreadConfig,
+      restrictedAgentScopedUserMcpServersEnabled,
       configuredMcpOwnershipVersion: attemptTools.configuredMcpOwnershipVersion,
       nativeToolSurfaceEnabled,
       nativeProviderWebSearchSupport,

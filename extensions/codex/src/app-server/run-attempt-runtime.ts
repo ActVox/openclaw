@@ -6,7 +6,10 @@ import {
   supportsModelTools,
   type EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { resolveCodexMcpToolOverridesForAgent } from "openclaw/plugin-sdk/codex-mcp-projection";
+import {
+  buildCodexUserMcpServersThreadConfigPatch,
+  resolveCodexMcpToolOverridesForAgent,
+} from "openclaw/plugin-sdk/codex-mcp-projection";
 import { prepareCodexAppServerAuthBinding } from "./auth-binding.js";
 import {
   resolveCodexAppServerAuthAccountCacheKey,
@@ -166,6 +169,14 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     agentId: sessionAgentId,
     toolOverrides: params.toolOverrides,
   });
+  // Restricted host policy still blocks native shell/file/code surfaces, but it
+  // must not suppress user MCP servers positively scoped to this exact agent.
+  const restrictedAgentScopedUserMcpServersEnabled =
+    params.pluginHarnessToolPolicyRestricted === true &&
+    buildCodexUserMcpServersThreadConfigPatch(params.config, {
+      agentId: sessionAgentId,
+      toolOverrides: codexMcpToolOverrides,
+    }) !== undefined;
   const bundleManifestRegistry = resolveCodexAttemptBundleManifestRegistry(
     params.preparedModelRuntime,
   );
@@ -284,6 +295,7 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     canResolveScheduledConfiguredMcpCreatorAuthority:
       mayResolveScheduledConfiguredMcpCreatorAuthority,
     codexMcpToolOverrides,
+    restrictedAgentScopedUserMcpServersEnabled,
     sandboxExecServerEnabled,
     nativeToolSurfaceEnabled,
     nativeProviderWebSearchSupport,

@@ -184,6 +184,39 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
     expect(mocks.createBundleLspToolRuntime).not.toHaveBeenCalled();
   });
 
+  it("preserves Codex MCP agent scope when the attempt runs on a fallback provider", async () => {
+    const input = createInput([], []);
+    input.sessionAgentId = "longreader";
+    input.attempt.provider = "anthropic";
+    input.attempt.config = {
+      mcp: {
+        servers: {
+          team: { url: "https://team.example/mcp", codex: { agents: ["longreader"] } },
+          private: { url: "https://private.example/mcp", codex: { agents: ["main"] } },
+        },
+      },
+    };
+    input.attempt.toolOverrides = {
+      mcpServers: {
+        private: true,
+        team: false,
+      },
+    };
+
+    await prepareEmbeddedAttemptBundleTools(input);
+
+    expect(mocks.getOrCreateSessionMcpRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolOverrides: {
+          mcpServers: {
+            private: false,
+            team: false,
+          },
+        },
+      }),
+    );
+  });
+
   it("refreshes spawned-child inheritance after authorized MCP tools materialize", async () => {
     const inheritedToolAllowlist = ["sessions_spawn"];
     mocks.getOrCreateSessionMcpRuntime.mockResolvedValue({});

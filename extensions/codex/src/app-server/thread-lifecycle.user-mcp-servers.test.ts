@@ -74,6 +74,71 @@ describe("startOrResumeThread — user mcp.servers projection (regression: #8081
     });
   });
 
+  it("keeps agent-scoped MCP servers on policy-restricted threads", async () => {
+    const sessionFile = path.join(tempDir, "session-restricted.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace-restricted");
+    const request = vi.fn(async (method: string, _params: unknown) => {
+      if (method === "config/read") {
+        return { config: {}, layers: [{ name: { type: "user" } }] };
+      }
+      if (method === "configRequirements/read") {
+        return { requirements: null };
+      }
+      if (method === "mcpServerStatus/list") {
+        return {
+          data: [
+            {
+              name: "notes",
+              serverInfo: { name: "notes", version: "1" },
+              tools: { get_note: { name: "get_note" } },
+            },
+          ],
+          nextCursor: null,
+        };
+      }
+      if (method === "thread/start") {
+        return threadStartResult("thread-restricted-mcp");
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const attempt = createParams(sessionFile, workspaceDir, {
+      mcp: {
+        servers: {
+          notes: {
+            transport: "stdio",
+            command: "node",
+            args: ["/opt/notes-mcp/dist/index.js"],
+          },
+        },
+      },
+    } as unknown as EmbeddedRunAttemptParams["config"]);
+    attempt.pluginHarnessToolPolicyRestricted = true;
+
+    await startOrResumeThread({
+      client: { request } as never,
+      params: attempt,
+      cwd: workspaceDir,
+      dynamicTools: [],
+      appServer: createAppServerOptions(),
+      nativeCodeModeEnabled: false,
+    });
+
+    const startCall = request.mock.calls.find(([method]) => method === "thread/start");
+    const startParams = startCall?.[1] as {
+      environments?: unknown[];
+      config?: {
+        "features.code_mode"?: boolean;
+        mcp_servers?: Record<string, { command?: string; enabled?: boolean }>;
+      };
+    };
+    expect(startParams?.environments).toEqual([]);
+    expect(startParams?.config?.["features.code_mode"]).toBe(false);
+    expect(startParams?.config?.mcp_servers?.notes).toMatchObject({
+      command: "node",
+    });
+    expect(startParams?.config?.mcp_servers?.notes?.enabled).not.toBe(false);
+  });
+
   it("stores large user MCP server fingerprints as bounded hashes", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     registerCodexTestSessionIdentity(sessionFile, "session-1", "agent:main:session-1");
