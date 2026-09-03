@@ -335,6 +335,7 @@ describe("slackPlugin actions", () => {
         "send",
         "react",
         "reactions",
+        "conversation-open",
         "read",
         "edit",
         "delete",
@@ -1172,13 +1173,17 @@ describe("slackPlugin outbound", () => {
       identity: { name: "Pulse", emoji: "📟" },
     });
 
-    expectRecordFields(requireMockCallArg(sendMessageSlackMock, 0, 2), "send options", {
-      identity: {
-        username: "Pulse",
-        iconUrl: undefined,
-        iconEmoji: "📟",
-      },
-    });
+    expect(sendMessageSlackMock).toHaveBeenCalledWith(
+      "C123",
+      "heartbeat alert",
+      expect.objectContaining({
+        identity: {
+          username: "Pulse",
+          iconUrl: undefined,
+          iconEmoji: "📟",
+        },
+      }),
+    );
   });
 
   it("forwards partial-send progress through the registered Slack sender", async () => {
@@ -1453,6 +1458,12 @@ describe("slackPlugin outbound", () => {
 
   it.each([
     {
+      name: "current",
+      replyToIsExplicit: true,
+      replyToCurrent: true,
+      expectedReplyToId: "1712345678.123456",
+    },
+    {
       name: "inherited",
       replyToIsExplicit: false,
       expectedReplyToId: "1712345678.123456",
@@ -1461,7 +1472,7 @@ describe("slackPlugin outbound", () => {
     { name: "unknown", replyToIsExplicit: undefined, expectedReplyToId: "1712345688.654321" },
   ])(
     "routes $name child replies to $expectedReplyToId",
-    ({ replyToIsExplicit, expectedReplyToId }) => {
+    ({ replyToIsExplicit, replyToCurrent, expectedReplyToId }) => {
       const resolveReplyTransport = slackPlugin.threading?.resolveReplyTransport;
       if (!resolveReplyTransport) {
         throw new Error("slack threading.resolveReplyTransport unavailable");
@@ -1473,6 +1484,7 @@ describe("slackPlugin outbound", () => {
           replyToId: "1712345688.654321",
           threadId: "1712345678.123456",
           replyToIsExplicit,
+          replyToCurrent,
         }),
       ).toEqual({ replyToId: expectedReplyToId, threadId: null });
     },
@@ -1576,41 +1588,52 @@ describe("slackPlugin outbound", () => {
     });
 
     expect(sendSlack).toHaveBeenCalledTimes(3);
-    expect(requireMockCallArgValue(sendSlack, 0, 0)).toBe("C999");
-    expect(requireMockCallArgValue(sendSlack, 0, 1)).toBe("");
-    expectRecordFields(requireMockCallArg(sendSlack, 0, 2), "first media options", {
+    expect(sendSlack).toHaveBeenNthCalledWith(1, "C999", "", {
+      cfg,
+      threadTs: undefined,
+      accountId: "default",
       mediaUrl: "https://example.com/1.png",
+      mediaAccess: undefined,
       mediaLocalRoots: ["/tmp/media"],
+      mediaReadFile: undefined,
     });
-    expect(requireMockCallArgValue(sendSlack, 1, 0)).toBe("C999");
-    expect(requireMockCallArgValue(sendSlack, 1, 1)).toBe("");
-    expectRecordFields(requireMockCallArg(sendSlack, 1, 2), "second media options", {
+    expect(sendSlack).toHaveBeenNthCalledWith(2, "C999", "", {
+      cfg,
+      threadTs: undefined,
+      accountId: "default",
       mediaUrl: "https://example.com/2.png",
+      mediaAccess: undefined,
       mediaLocalRoots: ["/tmp/media"],
+      mediaReadFile: undefined,
     });
-    expect(requireMockCallArgValue(sendSlack, 2, 0)).toBe("C999");
-    expect(requireMockCallArgValue(sendSlack, 2, 1)).toBe("hello\n\nBlock body");
-    expect(requireMockCallArg(sendSlack, 2, 2).blocks).toEqual([
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "hello",
-          verbatim: true,
+    expect(sendSlack).toHaveBeenNthCalledWith(3, "C999", "hello\n\nBlock body", {
+      cfg,
+      threadTs: undefined,
+      accountId: "default",
+      authoredTextPlacement: "blocks",
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "hello", verbatim: true },
         },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "Block body",
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Block body" },
         },
-      },
-    ]);
+      ],
+    });
     expect(result).toMatchObject({
       channel: "slack",
       messageId: "m-final",
-      receipt: { platformMessageIds: ["m-media-1", "m-media-2", "m-final"] },
+      receipt: {
+        platformMessageIds: ["m-media-1", "m-media-2", "m-final"],
+        primaryPlatformMessageId: "m-media-1",
+        parts: [
+          { index: 0, platformMessageId: "m-media-1" },
+          { index: 1, platformMessageId: "m-media-2" },
+          { index: 2, platformMessageId: "m-final" },
+        ],
+      },
     });
   });
 
@@ -1764,6 +1787,7 @@ describe("slackPlugin outbound", () => {
         text: "",
         mediaUrls: ["https://example.com/context.png"],
         channelData: {
+          askUser: { questionId, optionValues: ["one", "two"] },
           slack: { blocks: Array.from({ length: 48 }, () => ({ type: "divider" as const })) },
         },
         presentation: {

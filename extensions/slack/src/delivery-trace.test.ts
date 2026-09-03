@@ -6,9 +6,9 @@
 // the scripted steps stand in for the reply dispatcher callbacks (typing, partials,
 // tool progress, per-payload deliver). OUT events are the Slack Web API calls observed
 // at a recording WebClient stand-in. Native streaming runs through the REAL
-// @slack/web-api ChatStreamer so the SDK's buffered-ack contract is captured as-is:
-// append() returns null and issues NO network call until its local buffer crosses
-// buffer_size (256 chars), and stop() can be the first network call for short replies.
+// @slack/web-api ChatStreamer so the SDK's buffering contract is captured as-is:
+// previews may remain buffered below 256 chars, but finals flush before delivery
+// settles, including when native rejection requires ordinary-message fallback.
 // Refresh goldens with OPENCLAW_TRACE_UPDATE=1 (see delivery-trace harness docs).
 import { ChatStreamer } from "@slack/web-api/dist/chat-stream.js";
 import {
@@ -178,7 +178,7 @@ const INBOUND_TS = "1767225600.000100";
 
 type SlackTraceScenarioName =
   | "streaming-happy-native"
-  | "stream-stop-first-network-call"
+  | "short-final-native-rejection"
   | "final-blocks-and-text"
   | "cancel-mid-stream"
   | "preview-edit-fallback"
@@ -190,7 +190,7 @@ type SlackTraceScenarioName =
 
 const NATIVE_SCENARIOS = new Set<SlackTraceScenarioName>([
   "streaming-happy-native",
-  "stream-stop-first-network-call",
+  "short-final-native-rejection",
   "final-blocks-and-text",
   "native-prose-then-exec-failed",
 ]);
@@ -207,8 +207,7 @@ const NATIVE_FINAL_TEXT =
   "across the fleet. Rolling out to production now and watching the dashboards for " +
   "the next fifteen minutes before closing out the change.";
 
-// Short enough that every append stays inside the SDK's local buffer, so the
-// finalize stop() is the first Slack streaming network call of the turn.
+// Below the SDK's buffer threshold: final delivery must explicitly flush it.
 const SHORT_FINAL_TEXT = "All checks passed. Ship it.";
 
 const PREVIEW_PARTIAL_ONE = "Compiling the changelog";
@@ -252,7 +251,7 @@ const slackTraceScenarios: Record<SlackTraceScenarioName, readonly DeliveryTrace
     { kind: "final", text: NATIVE_FINAL_TEXT },
     { kind: "idle" },
   ],
-  "stream-stop-first-network-call": [
+  "short-final-native-rejection": [
     { kind: "reply-start" },
     { kind: "partial", text: "All checks passed." },
     { kind: "advance", ms: 300 },
@@ -627,10 +626,10 @@ async function setupSlackTrace(
   traceState.turn = null;
   traceState.turnStarted = createDeferred<void>();
   traceState.turnOutcome = createDeferred<{ queuedFinal: boolean; counts: TurnCounts }>();
-  // stop() rejections with a benign finalize code while text is still buffered
-  // must fall back to the durable full-text path (streaming.ts contract).
+  // Rejected native final delivery must complete ordinary-message fallback
+  // before the dispatcher settles the final payload.
   traceState.rejectStartStreamCode =
-    scenario === "stream-stop-first-network-call"
+    scenario === "short-final-native-rejection"
       ? "method_not_supported_for_channel_type"
       : undefined;
   traceState.client = createRecordingSlackClient();
@@ -844,7 +843,6 @@ describe("slack delivery trace goldens", () => {
   }
 
   it("removes a progress card detached by a later human message", async () => {
-    let progressEvents = 0;
     const events = await runDeliveryTraceScenario({
       scenario: {
         name: "progress-session-card-detached",
@@ -852,7 +850,7 @@ describe("slack delivery trace goldens", () => {
           { kind: "reply-start" },
           { kind: "tool-progress", name: "read", phase: "start" },
           { kind: "advance", ms: 2000 },
-          { kind: "tool-progress", name: "write", phase: "start" },
+          { kind: "partial", text: "Writing the implementation" },
           { kind: "advance", ms: 2000 },
           { kind: "final", text: "The replacement session card is complete." },
           { kind: "idle" },
@@ -861,19 +859,24 @@ describe("slack delivery trace goldens", () => {
       setup: async (recorder) => {
         const dispatch = await setupSlackTrace(recorder, "progress-session-card");
         return async (step) => {
-          if (step.kind === "tool-progress") {
-            progressEvents += 1;
-            if (progressEvents === 2) {
-              traceState.tsCounter += 1;
-              noteSlackDraftConversationMessage({
-                accountId: "default",
-                channelId: CHANNEL_ID,
-                threadTs: INBOUND_TS,
-                messageTs: `1767225601.${String(traceState.tsCounter).padStart(6, "0")}`,
-                userId: "U_SECOND",
-                botUserId: "UBOT",
-              });
-            }
+          if (step.kind === "partial") {
+            traceState.tsCounter += 1;
+            noteSlackDraftConversationMessage({
+              accountId: "default",
+              channelId: CHANNEL_ID,
+              threadTs: INBOUND_TS,
+              messageTs: `1767225601.${String(traceState.tsCounter).padStart(6, "0")}`,
+              userId: "U_SECOND",
+              botUserId: "UBOT",
+            });
+            // A changed authored status moves progress below the human message;
+            // ordinary tool activity intentionally leaves the summary unchanged.
+            await traceState.turn?.replyOptions.onItemEvent?.({
+              kind: "preamble",
+              itemId: "preamble-1",
+              progressText: step.text,
+            });
+            return;
           }
           await dispatch(step);
         };
@@ -883,7 +886,10 @@ describe("slack delivery trace goldens", () => {
 
     const workingPosts = events.filter(
       (event) =>
-        event.kind === "chat.postMessage" && JSON.stringify(event.data).includes("🔄 *Working*"),
+        event.kind === "chat.postMessage" &&
+        Array.isArray(
+          (event.data as { payload?: { blocks?: unknown } } | undefined)?.payload?.blocks,
+        ),
     );
     expect(workingPosts).toHaveLength(2);
     const firstCardId = (workingPosts[0]?.data as { result?: { ts?: string } } | undefined)?.result
@@ -899,13 +905,26 @@ describe("slack delivery trace goldens", () => {
           (event.data as { target?: string } | undefined)?.target === firstCardId,
       ),
     ).toBe(true);
-    expect(
-      events.some(
-        (event) =>
-          event.kind === "chat.update" &&
-          (event.data as { target?: string } | undefined)?.target === secondCardId &&
-          JSON.stringify(event.data).includes("✅ *Working*"),
-      ),
-    ).toBe(true);
+    const completedCard = events.find(
+      (event) =>
+        event.kind === "chat.update" &&
+        (event.data as { target?: string } | undefined)?.target === secondCardId,
+    );
+    expect(completedCard?.data).toMatchObject({
+      payload: {
+        blocks: expect.arrayContaining([
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "Completed: *Writing the implementation*" },
+          },
+          {
+            type: "actions",
+            elements: expect.arrayContaining([
+              expect.objectContaining({ action_id: "openclaw:session_link" }),
+            ]),
+          },
+        ]),
+      },
+    });
   });
 });

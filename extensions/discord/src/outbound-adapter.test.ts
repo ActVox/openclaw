@@ -281,9 +281,11 @@ describe("discordOutbound", () => {
     });
   });
 
-  it("falls back to bot send when webhook send fails", async () => {
+  it("falls back to bot send when Discord rejects the webhook send", async () => {
     mockDiscordBoundThreadManager(hoisted);
-    hoisted.sendWebhookMessageDiscordMock.mockRejectedValueOnce(new Error("rate limited"));
+    hoisted.sendWebhookMessageDiscordMock.mockRejectedValueOnce(
+      Object.assign(new Error("rate limited"), { status: 429 }),
+    );
 
     const result = await discordOutbound.sendText?.({
       cfg: {},
@@ -1137,6 +1139,45 @@ describe("discordOutbound", () => {
       url: "https://example.com/docs",
       disabled: true,
     });
+  });
+
+  it("encodes question buttons from Gateway option order", async () => {
+    const questionId = "ask_0123456789abcdef0123456789abcdef";
+    const payload = await discordOutbound.renderPresentation?.({
+      payload: {
+        channelData: { askUser: { questionId, optionValues: ["Staging", "Production"] } },
+      },
+      presentation: {
+        blocks: [
+          {
+            type: "buttons",
+            buttons: [
+              {
+                label: "Production",
+                action: { type: "question", questionId, optionValue: "Production" },
+              },
+              {
+                label: "Other…",
+                action: { type: "question", questionId, intent: "custom-input" },
+              },
+              {
+                label: "Staging",
+                action: { type: "question", questionId, optionValue: "Staging" },
+              },
+            ],
+          },
+        ],
+      },
+      ctx: { cfg: {}, to: "channel:123456" },
+    } as never);
+
+    const discordData = payload?.channelData?.discord as
+      | { presentationComponents?: { blocks?: Array<{ buttons?: unknown[] }> } }
+      | undefined;
+    expect(discordData?.presentationComponents?.blocks?.[0]?.buttons).toMatchObject([
+      { internalCustomId: `ocq:id=${questionId};i=1` },
+      { internalCustomId: `ocq:id=${questionId};i=0` },
+    ]);
   });
 
   it("falls back to chunked text when a table exceeds the Discord component envelope", async () => {

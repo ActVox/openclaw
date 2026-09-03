@@ -6,10 +6,7 @@ import {
   supportsModelTools,
   type EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import {
-  buildCodexUserMcpServersThreadConfigPatch,
-  resolveCodexMcpToolOverridesForAgent,
-} from "openclaw/plugin-sdk/codex-mcp-projection";
+import { resolveCodexMcpToolOverridesForAgent } from "openclaw/plugin-sdk/codex-mcp-projection";
 import { prepareCodexAppServerAuthBinding } from "./auth-binding.js";
 import {
   resolveCodexAppServerAuthAccountCacheKey,
@@ -55,6 +52,7 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     contextSessionKey,
     sandboxSessionKey,
     sessionAgentId,
+    policyAgentId,
     sandbox,
     attemptClientFactory,
     runAbortController,
@@ -169,19 +167,12 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     agentId: sessionAgentId,
     toolOverrides: params.toolOverrides,
   });
-  // Restricted host policy still blocks native shell/file/code surfaces, but it
-  // must not suppress user MCP servers positively scoped to this exact agent.
-  const restrictedAgentScopedUserMcpServersEnabled =
-    params.pluginHarnessToolPolicyRestricted === true &&
-    buildCodexUserMcpServersThreadConfigPatch(params.config, {
-      agentId: sessionAgentId,
-      toolOverrides: codexMcpToolOverrides,
-    }) !== undefined;
   const bundleManifestRegistry = resolveCodexAttemptBundleManifestRegistry(
     params.preparedModelRuntime,
   );
   const bundleMcpThreadConfig = await loadCodexBundleMcpThreadConfig({
     workspaceDir: effectiveWorkspace,
+    agentId: sessionAgentId,
     cfg: params.config,
     toolsEnabled: usesSupervisionConnection || supportsModelTools(params.model),
     disableTools: params.disableTools,
@@ -193,7 +184,7 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     params.trigger === "cron" &&
     params.scheduledToolPolicy !== undefined &&
     Array.isArray(params.toolsAllow);
-  const ownsScheduledConfiguredMcpSurface =
+  const scheduledConfiguredMcpSurface =
     authenticatedScheduledMode &&
     (bundleMcpThreadConfig.staticServerNames.length > 0 ||
       mutable.startupBinding?.configuredMcpOwnershipVersion === 1);
@@ -231,8 +222,13 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
   const nativeToolSurfaceEnabled = shouldEnableCodexAppServerNativeToolSurface(
     runtimeParams,
     sandbox,
-    { agentId: sessionAgentId, runtimeSessionKey: sandboxSessionKey, sandboxExecServerEnabled },
+    { agentId: policyAgentId, runtimeSessionKey: sandboxSessionKey, sandboxExecServerEnabled },
   );
+  const configuredMcpSurface = scheduledConfiguredMcpSurface
+    ? "scheduled"
+    : !nativeToolSurfaceEnabled && bundleMcpThreadConfig.staticServerNames.length > 0
+      ? "transient"
+      : undefined;
   preDynamicStartupStages.mark("native-tool-surface");
   const nativeProviderWebSearchSupport =
     resolveCodexWebSearchPlan({
@@ -291,11 +287,10 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     bundleMcpThreadConfig,
     bundleManifestRegistry,
     authenticatedScheduledMode,
-    ownsScheduledConfiguredMcpSurface,
+    configuredMcpSurface,
     canResolveScheduledConfiguredMcpCreatorAuthority:
       mayResolveScheduledConfiguredMcpCreatorAuthority,
     codexMcpToolOverrides,
-    restrictedAgentScopedUserMcpServersEnabled,
     sandboxExecServerEnabled,
     nativeToolSurfaceEnabled,
     nativeProviderWebSearchSupport,
