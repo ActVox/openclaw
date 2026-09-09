@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, assert, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildFullReleaseCandidateBinding,
   buildFullReleaseCandidateRequest,
@@ -83,6 +83,16 @@ function runCollector(mode: string, overrides: NodeJS.ProcessEnv) {
     timeout: 10_000,
   });
 }
+
+beforeEach(() => {
+  // Provenance fixtures model the canonical repository and must not inherit
+  // the repository name of whichever fork happens to execute this unit test.
+  vi.stubEnv("GITHUB_REPOSITORY", "openclaw/openclaw");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function candidateRequestInput(overrides: Record<string, unknown> = {}) {
   return {
