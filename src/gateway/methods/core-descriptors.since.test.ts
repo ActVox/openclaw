@@ -185,7 +185,7 @@ describe("core gateway method release trains", () => {
     ).toEqual(TRAIN_2026_7_METHODS.toSorted());
     expect(
       methods
-        .filter((method) => method.since === "2026.8")
+        .filter((method) => method.since === "2026.8" || method.since === "<=2026.8")
         .map((method) => method.name)
         .toSorted(),
     ).toEqual(TRAIN_2026_8_METHODS.toSorted());

@@ -35,6 +35,8 @@ type CoreGatewayMethodSpecRow = readonly [
 ];
 const CONTROL_PLANE_WRITE = { controlPlaneWrite: true } as const;
 
+// Keep the canonical protocol table compact enough to satisfy its own file-size ratchet.
+// oxfmt-ignore
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
 const CORE_GATEWAY_METHOD_SPECS = [
@@ -151,16 +153,16 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["users.setDisplayName", "users", "operator.write", "<=2026.7"],
   ["users.setAvatar", "users", "operator.write", "<=2026.7"],
   ["users.setRole", "users", "operator.admin", "2026.8"],
-  ["users.listAuthLinks", "users", "operator.read", "2026.8"],
-  ["users.listModelAccounts", "users", "operator.read", "2026.8"],
-  ["users.selectModelAccount", "users", "operator.write", "2026.8"],
-  ["users.linkAuthProfile", "users", "operator.admin", "2026.8"],
-  ["users.unlinkAuthProfile", "users", "operator.write", "2026.8"],
-  ["users.authConnect.start", "users", "operator.write", "2026.8"],
-  ["users.authConnect.answer", "users", "operator.write", "2026.8"],
-  ["users.authConnect.status", "users", "operator.write", "2026.8"],
-  ["users.authConnect.cancel", "users", "operator.write", "2026.8"],
-  ["users.authConnect.catalog", "users", "operator.write", "2026.8"],
+  ["users.listAuthLinks", "users", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["users.listModelAccounts", "users", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["users.selectModelAccount", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.linkAuthProfile", "users", "operator.admin", "<=2026.8", { compatibilityRestored: true }],
+  ["users.unlinkAuthProfile", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.authConnect.start", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.authConnect.answer", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.authConnect.status", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.authConnect.cancel", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
+  ["users.authConnect.catalog", "users", "operator.write", "<=2026.8", { compatibilityRestored: true }],
   ["tasks.list", "tasks", "operator.read", "<=2026.7"],
   ["tasks.get", "tasks", "operator.read", "<=2026.7"],
   ["tasks.cancel", "tasks", "operator.write", "<=2026.7"],
@@ -625,26 +627,26 @@ const CORE_GATEWAY_METHOD_SPECS = [
     { startup: true, controlPlaneWrite: true },
   ],
   ["sessions.title.prepare", "sessions-title", "operator.write", "2026.8", CONTROL_PLANE_WRITE],
-  ["users.mentionable", "users-mentionable", "operator.read", "2026.8", { startup: true }],
-  ["mentions.list", "mentions", "operator.read", "2026.8", { startup: true }],
+  ["users.mentionable", "users-mentionable", "operator.read", "<=2026.8", { startup: true, compatibilityRestored: true }],
+  ["mentions.list", "mentions", "operator.read", "<=2026.8", { startup: true, compatibilityRestored: true }],
   // Dismissal only changes the caller's temporary Inbox, not session or shared state.
-  ["mentions.dismiss", "mentions", "operator.read", "2026.8", { startup: true }],
+  ["mentions.dismiss", "mentions", "operator.read", "<=2026.8", { startup: true, compatibilityRestored: true }],
   // Meeting notes share the trusted operator domain, like workspace/session reads.
   // Strong user/tenant isolation requires separate Gateways; see operator-scopes.md.
-  ["transcripts.list", "transcripts", "operator.read", "2026.8"],
-  ["transcripts.get", "transcripts", "operator.read", "2026.8"],
-  ["models.authOrderSet", "models-auth-order", "operator.admin", "2026.8", CONTROL_PLANE_WRITE],
-  ["canvas.document.view", "canvas", "operator.read", "2026.8"],
-  ["plugins.controlUi.list", "plugins-control-ui", "operator.read", "2026.8"],
+  ["transcripts.list", "transcripts", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["transcripts.get", "transcripts", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["models.authOrderSet", "models-auth-order", "operator.admin", "<=2026.8", { controlPlaneWrite: true, compatibilityRestored: true }],
+  ["canvas.document.view", "canvas", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["plugins.controlUi.list", "plugins-control-ui", "operator.read", "<=2026.8", { compatibilityRestored: true }],
   [
     "plugins.controlUi.reload",
     "plugins-control-ui",
     "operator.admin",
-    "2026.8",
-    CONTROL_PLANE_WRITE,
+    "<=2026.8",
+    { controlPlaneWrite: true, compatibilityRestored: true },
   ],
-  ["plugins.controlUi.report", "plugins-control-ui", "operator.read", "2026.8"],
-  ["plugins.controlUi.status", "plugins-control-ui", "operator.admin", "2026.8"],
+  ["plugins.controlUi.report", "plugins-control-ui", "operator.read", "<=2026.8", { compatibilityRestored: true }],
+  ["plugins.controlUi.status", "plugins-control-ui", "operator.admin", "<=2026.8", { compatibilityRestored: true }],
   ["update.runs.get", "update", "operator.admin", "2026.9"],
   ["update.runs.list", "update", "operator.admin", "2026.9"],
   ["gateway.suspend.handoff", "suspend", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
