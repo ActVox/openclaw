@@ -133,6 +133,8 @@ const repositoryScriptEntries = [
   "scripts/oxlint-boundary-guards.mjs!",
   "scripts/plugin-prerelease-liveish-matrix.mts!",
   "scripts/pre-commit/guard-staged-content.mjs!",
+  // Maintainers invoke Practice Factory directly through its documented CLI path.
+  "scripts/practice-factory/cli.ts!",
   // Generates the checked-in native protocol models from core descriptor metadata.
   "scripts/protocol-gen.ts!",
   "scripts/pr-lib/ci-dispatch.mjs!",
