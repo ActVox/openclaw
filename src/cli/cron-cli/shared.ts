@@ -1,5 +1,6 @@
 // Shared cron CLI formatting, parsing, delivery preview, and warning helpers.
 import {
+  MAX_DATE_TIMESTAMP_MS,
   resolveExpiresAtMsFromDurationMs,
   timestampMsToIsoString,
 } from "@openclaw/normalization-core/number-coercion";
@@ -15,6 +16,7 @@ import { resolveCronStaggerMs } from "../../cron/stagger.js";
 import type { CronDeliveryPreview, CronJob, CronSchedule } from "../../cron/types.js";
 import { danger } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { formatExactDuration } from "../../infra/format-time/format-duration-exact.js";
 import { formatDurationHuman } from "../../infra/format-time/format-duration.ts";
 import { parseOffsetlessIsoDateTimeInTimeZone } from "../../infra/format-time/parse-offsetless-zoned-datetime.js";
 import { formatTimestamp } from "../../logging/timestamps.js";
@@ -284,10 +286,7 @@ export async function warnIfCronSchedulerDisabled(opts: GatewayRpcOpts) {
 export function parsePositiveCronDurationMs(input: string): number | null {
   try {
     const result = parseSharedDurationMs(input);
-    if (result <= 0) {
-      return null;
-    }
-    return result;
+    return result > 0 && result <= MAX_DATE_TIMESTAMP_MS ? result : null;
   } catch {
     return null;
   }
@@ -429,7 +428,7 @@ const formatSchedule = (schedule: CronSchedule | undefined, hasTrigger = false) 
     return `at ${formatIsoMinute(schedule.at)}${suffix}`;
   }
   if (schedule?.kind === "every") {
-    return `every ${formatDurationHuman(schedule.everyMs)}${suffix}`;
+    return `every ${formatExactDuration(schedule.everyMs)}${suffix}`;
   }
   if (schedule?.kind === "on-exit") {
     const cwd = schedule.cwd ? ` @ ${schedule.cwd}` : "";
@@ -449,7 +448,7 @@ const formatSchedule = (schedule: CronSchedule | undefined, hasTrigger = false) 
   if (staggerMs <= 0) {
     return `${base} (exact)`;
   }
-  return `${base} (stagger ${formatDurationHuman(staggerMs)})`;
+  return `${base} (stagger ${formatExactDuration(staggerMs)})`;
 };
 
 export function coerceCronDeliveryPreviews(value: unknown): Map<string, CronDeliveryPreview> {
@@ -475,7 +474,7 @@ export function coerceCronDeliveryPreviews(value: unknown): Map<string, CronDeli
 }
 
 export function printCronList(
-  jobs: CronJob[],
+  jobs: Array<CronJob & { effectiveAgentId?: string | null }>,
   runtime: RuntimeEnv = defaultRuntime,
   opts?: { deliveryPreviews?: Map<string, CronDeliveryPreview> },
 ) {
@@ -525,7 +524,8 @@ export function printCronList(
       ? `${deliveryPreview.label} (${deliveryPreview.detail})`
       : "-";
     const deliveryLabel = formatCell(deliveryText, CRON_DELIVERY_PAD);
-    const agentLabel = formatCell(job.agentId, CRON_AGENT_PAD);
+    const agentId = job.effectiveAgentId ?? job.agentId;
+    const agentLabel = formatCell(agentId ?? "unresolved", CRON_AGENT_PAD);
     const ownerLabel = formatCell(job.owner?.sessionKey ?? job.owner?.agentId, CRON_OWNER_PAD);
     const modelLabel = formatCell(
       job.payload?.kind === "agentTurn" ? job.payload.model : undefined,
@@ -536,7 +536,7 @@ export function printCronList(
       job.sessionTarget === "main"
         ? colorize(rich, theme.accent, targetLabel)
         : colorize(rich, theme.accentBright, targetLabel);
-    const coloredAgent = job.agentId
+    const coloredAgent = agentId
       ? colorize(rich, theme.info, agentLabel)
       : colorize(rich, theme.muted, agentLabel);
 

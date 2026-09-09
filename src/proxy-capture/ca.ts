@@ -25,6 +25,8 @@ function buildLocalProxyCaOpenSslConfig(commonName: string): string {
     "[v3_ca]",
     "basicConstraints = critical, CA:TRUE",
     "keyUsage = critical, keyCertSign, cRLSign",
+    "subjectKeyIdentifier = hash",
+    "authorityKeyIdentifier = keyid:always,issuer",
     "",
   ].join("\n");
 }
@@ -159,7 +161,9 @@ export async function ensureSecretEgressProxyCa(certDir: string): Promise<LocalP
   return await ensureLocalProxyCa(certDir, {
     commonName: "OpenClaw Secret Egress Proxy",
     purpose: "secret egress proxy",
-    validityDays: 1,
+    // Trust is loaded once by subprocesses. Key retention is still limited to
+    // this Gateway process; certificate expiry must not impose daily restarts.
+    validityDays: 3650,
   });
 }
 
@@ -202,7 +206,15 @@ async function generateLocalProxyLeafQueued(params: {
     const sanKind = parseCanonicalIpAddress(params.hostname) ? "IP" : "DNS";
     fs.writeFileSync(
       extPath,
-      `subjectAltName=${sanKind}:${params.hostname}\nextendedKeyUsage=serverAuth\n`,
+      [
+        "basicConstraints=critical,CA:FALSE",
+        "keyUsage=critical,digitalSignature,keyEncipherment",
+        "extendedKeyUsage=serverAuth",
+        "subjectKeyIdentifier=hash",
+        "authorityKeyIdentifier=keyid,issuer",
+        `subjectAltName=${sanKind}:${params.hostname}`,
+        "",
+      ].join("\n"),
       { mode: LOCAL_PROXY_PRIVATE_KEY_MODE },
     );
     await runExec(

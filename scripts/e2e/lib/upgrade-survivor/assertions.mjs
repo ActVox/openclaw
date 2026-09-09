@@ -15,8 +15,17 @@ import {
 import { assertUpgradeVolumeMigrated, seedUpgradeVolume } from "./sqlite-volume.mjs";
 
 const command = process.argv[2];
+// Keep unrelated packaged assertion commands independent of agent-turn helpers.
+const legacyOperator =
+  process.env.OPENCLAW_UPGRADE_SURVIVOR_SCENARIO === "legacy-operator-state" ||
+  command?.includes("legacy-operator")
+    ? await import("./legacy-operator-state.mjs")
+    : undefined;
 const SCENARIOS = new Set([
   "base",
+  "abandoned-update",
+  "legacy-operator-state",
+  "mobile-pairing-reconnect",
   "acpx-openclaw-tools-bridge",
   "feishu-channel",
   "bootstrap-persona",
@@ -33,6 +42,7 @@ const SCENARIOS = new Set([
   "sqlite-volume",
   "recovery-cleanup",
   "auth-profile-v2026-7-2-beta-5",
+  "watchos-direct-node",
 ]);
 
 const PERSONA_FILES = new Map([
@@ -357,6 +367,10 @@ function seedState() {
   const stateDir = requireEnv("OPENCLAW_STATE_DIR");
   const workspace = requireEnv("OPENCLAW_TEST_WORKSPACE_DIR");
   const scenario = getScenario();
+  if (scenario === "legacy-operator-state") {
+    // The scenario has already authored its state with the baseline's own CLI.
+    return;
+  }
 
   write(
     path.join(workspace, "IDENTITY.md"),
@@ -371,6 +385,11 @@ function seedState() {
     version: 1,
     setupCompletedAt: "2026-04-01T00:00:00.000Z",
   });
+  // Companion reconnect rows own their real pairing state. Generic migration
+  // specimens can block a frozen candidate before its auth path is exercised.
+  if (scenario === "watchos-direct-node" || scenario === "mobile-pairing-reconnect") {
+    return;
+  }
   writeJson(path.join(stateDir, "agents", "main", "sessions", "legacy-session.json"), {
     id: "legacy-session",
     agentId: "main",
@@ -464,6 +483,12 @@ function assertConfigSurvived() {
   const config = getConfig();
   const coverage = getCoverage();
   const scenario = getScenario();
+  if (scenario === "legacy-operator-state") {
+    legacyOperator.assertLegacyOperatorConfig(
+      process.env.OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE || "survival",
+    );
+    return;
+  }
   if (scenario === "meeting-transcripts-sqlite") {
     // This focused migration fixture proves state import/export across one published
     // baseline; the broad base scenario owns unrelated agent/channel config parity.
@@ -481,7 +506,8 @@ function assertConfigSurvived() {
     assert(config.update?.channel === expectedChannel, "update.channel was not preserved");
   }
   if (acceptsIntent(coverage, "gateway")) {
-    assert(config.gateway?.auth?.mode === "token", "gateway auth mode was not preserved");
+    const expectedAuthMode = scenario === "mobile-pairing-reconnect" ? "password" : "token";
+    assert(config.gateway?.auth?.mode === expectedAuthMode, "gateway auth mode was not preserved");
   }
 
   if (acceptsIntent(coverage, "models")) {
@@ -638,7 +664,14 @@ function assertStateSurvived() {
   const workspace = requireEnv("OPENCLAW_TEST_WORKSPACE_DIR");
   const scenario = getScenario();
   const stage = process.env.OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE || "survival";
+  if (scenario === "legacy-operator-state") {
+    legacyOperator.assertLegacyOperatorConfig(stage);
+    return;
+  }
   assert(fs.existsSync(path.join(workspace, "IDENTITY.md")), "workspace identity file missing");
+  if (scenario === "watchos-direct-node" || scenario === "mobile-pairing-reconnect") {
+    return;
+  }
   assert(
     fs.existsSync(path.join(stateDir, "agents", "main", "sessions", "legacy-session.json")),
     "legacy session file missing",
@@ -659,17 +692,19 @@ function assertStateSurvived() {
     assertAuthProfileMigrationSurvived(stateDir, stage);
   }
   const legacyRuntimeRoot = path.join(stateDir, "plugin-runtime-deps");
-  if (stage === "baseline") {
-    if (fs.existsSync(legacyRuntimeRoot)) {
-      assert(
-        fs.existsSync(path.join(legacyRuntimeRoot, "discord")),
-        "legacy plugin runtime deps root exists but discord debris is missing before doctor cleanup",
-      );
-    }
-  } else {
-    assert(
-      !fs.existsSync(legacyRuntimeRoot),
-      `legacy plugin runtime deps root survived update/doctor: ${legacyRuntimeRoot}`,
+  for (const plugin of ["discord", "telegram", "whatsapp"]) {
+    const sentinel = path.join(
+      legacyRuntimeRoot,
+      plugin,
+      ".openclaw-runtime-deps-copy-stale",
+      "node_modules",
+      "stale-sentinel",
+      "package.json",
+    );
+    assertStrict.deepEqual(
+      readJson(sentinel),
+      { name: "stale-sentinel", version: "0.0.0" },
+      `shared plugin runtime cache changed during update/doctor: ${sentinel}`,
     );
   }
   if (scenario === "bootstrap-persona") {
@@ -686,18 +721,21 @@ function assertStateSurvived() {
     );
   }
   if (scenario === "versioned-runtime-deps") {
-    if (stage === "baseline") {
-      return;
-    }
     const version = process.env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_VERSION || "2026.4.24";
-    const runtimeRoot = path.join(stateDir, "plugin-runtime-deps");
-    const staleVersionedRoots = fs.existsSync(runtimeRoot)
-      ? fs.readdirSync(runtimeRoot).filter((entry) => entry.startsWith(`openclaw-${version}-`))
-      : [];
-    assert(
-      staleVersionedRoots.length === 0,
-      `stale versioned runtime deps survived update/doctor: ${staleVersionedRoots.join(", ")}`,
-    );
+    for (const plugin of ["discord", "feishu", "telegram", "whatsapp"]) {
+      const sentinel = path.join(
+        legacyRuntimeRoot,
+        `openclaw-${version}-${plugin}`,
+        "node_modules",
+        "stale-sentinel",
+        "package.json",
+      );
+      assertStrict.deepEqual(
+        readJson(sentinel),
+        { name: "stale-sentinel", version: "0.0.0" },
+        `versioned shared runtime cache changed during update/doctor: ${sentinel}`,
+      );
+    }
   }
 }
 
@@ -1064,6 +1102,16 @@ function readInstalledPluginIndex() {
   const index = readPluginInstallIndex({ stateDir });
   assert(index.installRecords, "installed plugin index missing");
   return index;
+}
+
+function assertBaselinePlugin([expectedVersion]) {
+  const record = readInstalledPluginIndex().installRecords.discord;
+  assert(record?.source === "npm", "baseline Discord plugin was not installed from npm");
+  assert(record.spec === "@openclaw/discord@latest", "baseline plugin selector became pinned");
+  const installed = readJson(path.join(resolveHomePath(record.installPath), "package.json"));
+  assert(installed.name === "@openclaw/discord", "baseline plugin package identity changed");
+  assert(installed.version === expectedVersion, "baseline plugin is not the baseline version");
+  console.log(`Baseline npm plugin: @openclaw/discord@${expectedVersion}, selector=latest.`);
 }
 
 function assertExternalPluginInstall(records, pluginId, packageName) {
@@ -1635,15 +1683,117 @@ function assertUpdateRunSelfUpgrade([file]) {
   );
 }
 
+function assertMobilePairingEvidence(files) {
+  const expectedPhases = ["baseline", "candidate-first", "candidate-restart", "final"];
+  const expectedNodeSurfaceAdditions = ["watch.notify", "watch.status"];
+  assert(
+    files.length === expectedPhases.length,
+    "mobile pairing evidence requires all four reconnect phases",
+  );
+  const evidence = files.map((file, index) => {
+    const value = readJson(file);
+    assert(value?.phase === expectedPhases[index], "mobile pairing evidence phase changed");
+    assert(value?.ok === true, "mobile pairing reconnect did not pass");
+    assert(value?.health === true, "mobile pairing health check did not pass");
+    assert(
+      value?.connectedDevicePresent === true,
+      "mobile pairing connected device assertion did not pass",
+    );
+    assert(value?.pendingDevicePairingCount === 0, "mobile device pairing left a pending request");
+    assert(value?.pairedDevicePresent === true, "paired mobile device missing");
+    assert(value?.pairedNodePresent === true, "paired mobile node missing");
+    const cleanPairingState =
+      value?.pendingPairingCount === 0 &&
+      value?.pendingNodePairingCount === 0 &&
+      value?.nodeSurfaceReapprovalRequired === false &&
+      Array.isArray(value?.nodeSurfaceCommandAdditions) &&
+      value.nodeSurfaceCommandAdditions.length === 0;
+    const scopedNodeSurfaceReapproval =
+      index > 0 &&
+      value?.pendingPairingCount === 1 &&
+      value?.pendingNodePairingCount === 1 &&
+      value?.nodeSurfaceReapprovalRequired === true &&
+      JSON.stringify(value?.nodeSurfaceCommandAdditions) ===
+        JSON.stringify(expectedNodeSurfaceAdditions);
+    assert(
+      typeof value?.nodeSurfaceReapprovalExpected === "boolean",
+      "mobile node pairing reapproval expectation missing",
+    );
+    assert(
+      value.nodeSurfaceReapprovalExpected ? scopedNodeSurfaceReapproval : cleanPairingState,
+      "mobile node pairing pending state exceeded the known command-surface reapproval",
+    );
+    assert(value?.missingPasswordReason === true, "mobile pairing password_missing proof missing");
+    assert(
+      value?.missingPasswordClose1008 === true,
+      "mobile pairing password_missing close code proof missing",
+    );
+    for (const role of ["node", "operator"]) {
+      const credential = value?.credentials?.[role];
+      assert(
+        /^[a-f0-9]{64}$/u.test(credential?.usedTokenHash),
+        `mobile pairing ${role} used token hash missing`,
+      );
+      assert(
+        /^[a-f0-9]{64}$/u.test(credential?.storedTokenHash),
+        `mobile pairing ${role} stored token hash missing`,
+      );
+      assert(
+        typeof credential?.deviceTokenReturned === "boolean",
+        `mobile pairing ${role} token return flag missing`,
+      );
+      assert(
+        typeof credential?.tokenRotated === "boolean",
+        `mobile pairing ${role} rotation flag missing`,
+      );
+    }
+    return value;
+  });
+
+  for (let index = 1; index < evidence.length; index += 1) {
+    for (const role of ["node", "operator"]) {
+      assert(
+        evidence[index - 1]?.credentials?.[role]?.storedTokenHash ===
+          evidence[index]?.credentials?.[role]?.usedTokenHash,
+        `mobile pairing ${role} reconnect did not use the newest stored token`,
+      );
+    }
+  }
+}
+
 if (command === "list-scenarios") {
   process.stdout.write(`${JSON.stringify([...SCENARIOS])}\n`);
 } else if (command === "seed") {
   seedState();
+} else if (command === "seed-legacy-operator") {
+  legacyOperator.seedLegacyOperatorState();
+} else if (command === "seed-legacy-operator-external-plugin") {
+  legacyOperator.seedLegacyOperatorExternalPlugin();
+} else if (command === "assert-legacy-operator-external-plugin") {
+  legacyOperator.assertLegacyOperatorExternalPlugin(process.argv[3]);
+} else if (command === "assert-baseline-plugin") {
+  assertBaselinePlugin(process.argv.slice(3));
+} else if (command === "seed-legacy-operator-default-cron") {
+  legacyOperator.seedLegacyOperatorDefaultCron();
+} else if (command === "seed-legacy-operator-agent") {
+  legacyOperator.seedLegacyOperatorAgent();
+} else if (command === "seed-legacy-operator-gateway") {
+  legacyOperator.seedLegacyOperatorGatewayState();
+} else if (command === "assert-legacy-operator-gateway") {
+  legacyOperator.assertLegacyOperatorGatewayState(process.argv[3] || "candidate");
+} else if (command === "legacy-operator-turn") {
+  legacyOperator.runLegacyOperatorTurn(process.argv[3]);
 } else if (command === "assert-exec-approvals") {
-  assertExecApprovalPolicySurvived(
-    requireEnv("OPENCLAW_STATE_DIR"),
-    process.env.OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE || "survival",
-  );
+  if (getScenario() === "legacy-operator-state") {
+    legacyOperator.assertLegacyOperatorApprovals(
+      process.env.OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE || "survival",
+    );
+  } else if (!["watchos-direct-node", "mobile-pairing-reconnect"].includes(getScenario())) {
+    assertExecApprovalPolicySurvived(
+      requireEnv("OPENCLAW_STATE_DIR"),
+      process.env.OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE || "survival",
+    );
+  }
 } else if (command === "seed-volume") {
   assert(getScenario() === "sqlite-volume", "seed-volume requires the sqlite-volume scenario");
   const stateDir = requireEnv("OPENCLAW_STATE_DIR");
@@ -1675,6 +1825,8 @@ if (command === "list-scenarios") {
   assertRepairJson(process.argv.slice(3));
 } else if (command === "assert-update-run-self-upgrade") {
   assertUpdateRunSelfUpgrade(process.argv.slice(3));
+} else if (command === "assert-mobile-pairing-evidence") {
+  assertMobilePairingEvidence(process.argv.slice(3));
 } else {
   throw new Error(`unknown upgrade-survivor assertion command: ${command ?? "<missing>"}`);
 }

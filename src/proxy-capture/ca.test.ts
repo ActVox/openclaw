@@ -30,11 +30,19 @@ vi.mock("node:crypto", async (importOriginal) => {
 
         constructor(value: Buffer) {
           this.marker = parseMarker(value, "ca-cert-marker:");
-          this.ca = this.marker !== "not-ca";
+          this.ca = this.marker !== "not-ca" && !this.marker.startsWith("leaf:");
         }
 
         checkPrivateKey(key: { marker?: string }): boolean {
           return key.marker === this.marker;
+        }
+
+        checkHost(hostname: string): string | undefined {
+          return this.marker === `leaf:${hostname}` ? hostname : undefined;
+        }
+
+        checkIP(hostname: string): string | undefined {
+          return this.checkHost(hostname);
         }
       },
     },
@@ -47,11 +55,11 @@ vi.mock("../process/exec.js", async (importOriginal) => ({
   runExec: runExecMock,
 }));
 
-import { ensureDebugProxyCa } from "./ca.js";
+import { ensureDebugProxyCa, generateLocalProxyLeaf } from "./ca.js";
 
 const tempDirs = createTrackedTempDirs();
 
-function outputPath(args: string[], flag: "-config" | "-keyout" | "-out"): string {
+function outputPath(args: string[], flag: "-config" | "-keyout" | "-out" | "-extfile"): string {
   const index = args.indexOf(flag);
   const value = args[index + 1];
   if (!value) {
@@ -124,6 +132,8 @@ describe("ensureDebugProxyCa", () => {
     expect(generatedConfig).toContain("CN = OpenClaw Debug Proxy");
     expect(generatedConfig).toContain("basicConstraints = critical, CA:TRUE");
     expect(generatedConfig).toContain("keyUsage = critical, keyCertSign, cRLSign");
+    expect(generatedConfig).toContain("subjectKeyIdentifier = hash");
+    expect(generatedConfig).toContain("authorityKeyIdentifier = keyid:always,issuer");
   });
 
   it("rejects matching certificate material that is not a CA", async () => {
@@ -192,5 +202,44 @@ describe("ensureDebugProxyCa", () => {
     expect(fs.readFileSync(certPath, "utf8")).toBe("ca-cert-marker:retry-after-publication");
     expect(fs.readFileSync(keyPath, "utf8")).toBe("ca-material-marker:retry-after-publication");
     expect(runExecMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("generateLocalProxyLeaf", () => {
+  it("emits OpenSSL extensions accepted by strict TLS verifiers", async () => {
+    const certDir = await tempDirs.make("openclaw-proxy-leaf-");
+    const caCertPath = path.join(certDir, "root-ca.pem");
+    const caKeyPath = path.join(certDir, "root-ca-key.pem");
+    fs.writeFileSync(caCertPath, "ca-cert-marker:ca");
+    fs.writeFileSync(caKeyPath, "ca-material-marker:ca");
+    let generatedExtensions = "";
+    runExecMock.mockImplementation(async (_command: string, args: string[]) => {
+      if (args[0] === "genrsa") {
+        fs.writeFileSync(outputPath(args, "-out"), "ca-material-marker:leaf:example.com");
+        return;
+      }
+      if (args[0] === "req") {
+        fs.writeFileSync(outputPath(args, "-out"), "csr");
+        return;
+      }
+      if (args[0] === "x509") {
+        generatedExtensions = fs.readFileSync(outputPath(args, "-extfile"), "utf8");
+        fs.writeFileSync(outputPath(args, "-out"), "ca-cert-marker:leaf:example.com");
+      }
+    });
+
+    await expect(
+      generateLocalProxyLeaf({
+        certDir,
+        ca: { certPath: caCertPath, keyPath: caKeyPath },
+        hostname: "example.com",
+      }),
+    ).resolves.toMatchObject({ cert: expect.any(Buffer), key: expect.any(Buffer) });
+
+    expect(generatedExtensions).toContain("basicConstraints=critical,CA:FALSE");
+    expect(generatedExtensions).toContain("keyUsage=critical,digitalSignature,keyEncipherment");
+    expect(generatedExtensions).toContain("subjectKeyIdentifier=hash");
+    expect(generatedExtensions).toContain("authorityKeyIdentifier=keyid,issuer");
+    expect(generatedExtensions).toContain("subjectAltName=DNS:example.com");
   });
 });
