@@ -118,6 +118,30 @@ describe("read content guard", () => {
     expect(decodeText).toHaveBeenCalledOnce();
   });
 
+  it("lets a custom decoder disambiguate BOM-less UTF-16 from a false media signature", async () => {
+    const utf16 = Buffer.alloc(4096);
+    utf16.fill(Buffer.from([0x47, 0x00]));
+    const decodeText = vi.fn(({ buffer }: { buffer: Buffer }) => buffer.toString("utf16le"));
+    const tool = createReadToolDefinition("/workspace", {
+      operations: {
+        access: async () => {},
+        decodeText,
+        detectImageMimeType: async () => null,
+        readFile: async () => utf16,
+      },
+    });
+
+    const result = await tool.execute(
+      "call-bomless-utf16",
+      { path: "synthetic-large.txt", limit: 1 },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(textContent(result)).toContain("G");
+    expect(decodeText).toHaveBeenCalledOnce();
+  });
+
   it("lets a custom decoder handle UTF-16LE text with a BOM", async () => {
     const utf16 = Buffer.concat([
       Buffer.from([0xff, 0xfe]),
