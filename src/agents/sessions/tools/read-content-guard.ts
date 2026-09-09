@@ -26,6 +26,29 @@ function hasTextByteOrderMark(buffer: Buffer): boolean {
   );
 }
 
+function looksLikeBomlessUtf16(buffer: Buffer): boolean {
+  const pairs = Math.min(Math.floor(buffer.length / 2), 2048);
+  if (pairs < 8) {
+    return false;
+  }
+  let evenNuls = 0;
+  let oddNuls = 0;
+  for (let index = 0; index < pairs * 2; index += 2) {
+    if (buffer[index] === 0) {
+      evenNuls += 1;
+    }
+    if (buffer[index + 1] === 0) {
+      oddNuls += 1;
+    }
+  }
+  const likelyTextLane = pairs * 0.3;
+  const unlikelyTextLane = pairs * 0.05;
+  return (
+    (evenNuls >= likelyTextLane && oddNuls <= unlikelyTextLane) ||
+    (oddNuls >= likelyTextLane && evenNuls <= unlikelyTextLane)
+  );
+}
+
 function decodeUtf16ByteOrderMark(buffer: Buffer): string | undefined {
   if (buffer.length < 2) {
     return undefined;
@@ -39,8 +62,12 @@ function decodeUtf16ByteOrderMark(buffer: Buffer): string | undefined {
   return undefined;
 }
 
-async function assertReadableTextBuffer(buffer: Buffer, filePath: string): Promise<void> {
-  if (hasTextByteOrderMark(buffer)) {
+async function assertReadableTextBuffer(
+  buffer: Buffer,
+  filePath: string,
+  usesCustomDecoder: boolean,
+): Promise<void> {
+  if (hasTextByteOrderMark(buffer) || (usesCustomDecoder && looksLikeBomlessUtf16(buffer))) {
     return;
   }
   const mimeType = await detectMime({ buffer });
@@ -88,7 +115,7 @@ export async function decodeReadableTextBuffer(params: {
   decodeText?: () => string;
   usesCustomDecoder: boolean;
 }): Promise<string> {
-  await assertReadableTextBuffer(params.buffer, params.filePath);
+  await assertReadableTextBuffer(params.buffer, params.filePath, params.usesCustomDecoder);
   const bomDecodedText = params.usesCustomDecoder
     ? undefined
     : decodeUtf16ByteOrderMark(params.buffer);
