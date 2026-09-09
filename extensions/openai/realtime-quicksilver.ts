@@ -26,7 +26,7 @@ export function isSupportedOpenAIGptLiveModel(model: string | undefined): boolea
     return false;
   }
   const normalized = model.trim().toLowerCase();
-  return OPENAI_GPT_LIVE_MODELS.includes(normalized as (typeof OPENAI_GPT_LIVE_MODELS)[number]);
+  return OPENAI_GPT_LIVE_MODELS.some((candidate) => candidate === normalized);
 }
 
 export function resolveOpenAIQuicksilverVoice(model: string, value: unknown): OpenAIGptLiveVoice {
