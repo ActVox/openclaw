@@ -29,9 +29,10 @@ describe("openai gpt-live model detection", () => {
     expect(isOpenAIGptLiveModel("gpt-liveish")).toBe(false);
   });
 
-  it("distinguishes the released route from unlisted family members", () => {
+  it("distinguishes the released route from exact-name lookalikes", () => {
     expect(isSupportedOpenAIGptLiveModel("gpt-live-1-codex")).toBe(true);
     expect(isSupportedOpenAIGptLiveModel(" GPT-Live-1-Codex ")).toBe(true);
+    expect(isSupportedOpenAIGptLiveModel("gpt-live-1-codex-preview")).toBe(false);
     expect(isSupportedOpenAIGptLiveModel("gpt-live-test-canary")).toBe(false);
   });
 });
