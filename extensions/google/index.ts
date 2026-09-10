@@ -3,6 +3,7 @@ import { createLazyRuntimeSurface } from "openclaw/plugin-sdk/lazy-runtime";
 import type { MediaUnderstandingProvider } from "openclaw/plugin-sdk/media-understanding";
 import type { MusicGenerationProvider } from "openclaw/plugin-sdk/music-generation";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { VideoGenerationProvider } from "openclaw/plugin-sdk/video-generation";
 import { buildGoogleGeminiCliBackend } from "./cli-backend.js";
 import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
@@ -21,6 +22,12 @@ import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.
 type GoogleMediaUnderstandingProvider = Required<
   Pick<MediaUnderstandingProvider, "transcribeAudio" | "describeVideo">
 >;
+
+export function isGoogleImageGenerationEnabled(pluginConfig: unknown): boolean {
+  const config = asOptionalRecord(pluginConfig);
+  const imageGeneration = asOptionalRecord(config?.imageGeneration);
+  return imageGeneration?.enabled !== false;
+}
 
 const loadGoogleImageGenerationProvider = createLazyRuntimeSurface(
   () => import("./image-generation-provider.js"),
@@ -92,7 +99,9 @@ export default definePluginEntry({
     registerGoogleGeminiCliProvider(api);
     registerGoogleProvider(api);
     api.registerEmbeddingProvider(geminiMemoryEmbeddingProviderAdapter);
-    api.registerImageGenerationProvider(createLazyGoogleImageGenerationProvider());
+    if (isGoogleImageGenerationEnabled(api.pluginConfig)) {
+      api.registerImageGenerationProvider(createLazyGoogleImageGenerationProvider());
+    }
     api.registerMediaUnderstandingProvider(createLazyGoogleMediaUnderstandingProvider());
     api.registerMusicGenerationProvider(createLazyGoogleMusicGenerationProvider());
     api.registerRealtimeVoiceProvider(createLazyGoogleRealtimeVoiceProvider());
