@@ -250,3 +250,15 @@ describe("google manifest webSearch headers", () => {
     expect(manifest.uiHints?.["webSearch.headers.*"]?.sensitive).not.toBe(true);
   });
 });
+
+describe("google manifest image generation", () => {
+  it("accepts an explicit image generation disable flag", () => {
+    const schema = loadManifest().configSchema;
+    if (!schema) {
+      throw new Error("expected google manifest configSchema");
+    }
+    const safeParse = buildJsonPluginConfigSchema(schema).safeParse;
+    expect(safeParse?.({ imageGeneration: { enabled: false } }).success).toBe(true);
+    expect(safeParse?.({ imageGeneration: { enabled: "false" } }).success).toBe(false);
+  });
+});
