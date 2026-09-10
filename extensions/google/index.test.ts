@@ -20,7 +20,7 @@ import type {
 } from "openclaw/plugin-sdk/realtime-voice";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
-import googlePlugin from "./index.js";
+import googlePlugin, { isGoogleImageGenerationEnabled } from "./index.js";
 import googleProviderDiscovery from "./provider-discovery.js";
 import { registerGoogleProvider } from "./provider-registration.js";
 
@@ -971,5 +971,16 @@ describe("google provider plugin hooks", () => {
     expect(loaded.close).toHaveBeenCalledOnce();
     expect(loaded.sendUserMessage).not.toHaveBeenCalled();
     expect(loaded.triggerGreeting).not.toHaveBeenCalled();
+  });
+});
+
+describe("isGoogleImageGenerationEnabled", () => {
+  it("defaults to enabled for backwards compatibility", () => {
+    expect(isGoogleImageGenerationEnabled(undefined)).toBe(true);
+    expect(isGoogleImageGenerationEnabled({})).toBe(true);
+  });
+
+  it("disables only image generation when explicitly configured", () => {
+    expect(isGoogleImageGenerationEnabled({ imageGeneration: { enabled: false } })).toBe(false);
   });
 });
