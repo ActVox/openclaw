@@ -60,6 +60,11 @@ const validSpec = {
 };
 
 describe("practice-factory", () => {
+  it("keeps the documented CLI registered as a production executable root", async () => {
+    const knipConfig = await readFile(join(process.cwd(), "config", "knip.config.ts"), "utf8");
+    expect(knipConfig).toContain('"scripts/practice-factory/cli.ts!"');
+  });
+
   it("validates required practice pack shape", () => {
     expect(validatePracticePackSpec(validSpec)).toMatchObject({ ok: true, issues: [] });
 

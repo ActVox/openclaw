@@ -8,8 +8,8 @@ import type {
   ProviderReplaySessionEntry,
   ProviderSanitizeReplayHistoryContext,
 } from "openclaw/plugin-sdk/plugin-entry";
-import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import {
+  createCapturedPluginRegistration,
   registerProviderPlugin,
   requireRegisteredProvider,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
@@ -17,11 +17,10 @@ import { createCapturedThinkingConfigStream } from "openclaw/plugin-sdk/provider
 import type {
   RealtimeVoiceBridge,
   RealtimeVoiceBridgeCreateRequest,
-  RealtimeVoiceProviderPlugin,
 } from "openclaw/plugin-sdk/realtime-voice";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
-import googlePlugin from "./index.js";
+import googlePlugin, { isGoogleImageGenerationEnabled } from "./index.js";
 import googleProviderDiscovery from "./provider-discovery.js";
 import { registerGoogleProvider } from "./provider-registration.js";
 
@@ -72,13 +71,10 @@ function createLazyRealtimeBridge(
   onReady?: () => void,
   onClose?: (reason: "completed" | "error") => void,
 ) {
-  let realtimeProvider: RealtimeVoiceProviderPlugin | undefined;
-  googlePlugin.register(
-    createTestPluginApi({
-      registerRealtimeVoiceProvider(provider) {
-        realtimeProvider = provider;
-      },
-    }),
+  const captured = createCapturedPluginRegistration({ id: "google" });
+  googlePlugin.register(captured.api);
+  const realtimeProvider = captured.realtimeVoiceProviders.find(
+    (provider) => provider.id === "google",
   );
   const bridge = realtimeProvider?.createBridge({
     providerConfig: { apiKey: "gemini-key" },
@@ -132,6 +128,7 @@ describe("google provider plugin hooks", () => {
       } as never),
     ).toEqual({
       sanitizeMode: "full",
+      appendOnlyRuntimeContext: false,
       sanitizeToolCallIds: true,
       toolCallIdMode: "strict",
       sanitizeThoughtSignatures: {
@@ -974,5 +971,16 @@ describe("google provider plugin hooks", () => {
     expect(loaded.close).toHaveBeenCalledOnce();
     expect(loaded.sendUserMessage).not.toHaveBeenCalled();
     expect(loaded.triggerGreeting).not.toHaveBeenCalled();
+  });
+});
+
+describe("isGoogleImageGenerationEnabled", () => {
+  it("defaults to enabled for backwards compatibility", () => {
+    expect(isGoogleImageGenerationEnabled(undefined)).toBe(true);
+    expect(isGoogleImageGenerationEnabled({})).toBe(true);
+  });
+
+  it("disables only image generation when explicitly configured", () => {
+    expect(isGoogleImageGenerationEnabled({ imageGeneration: { enabled: false } })).toBe(false);
   });
 });

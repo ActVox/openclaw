@@ -39,6 +39,15 @@ Use this with `$release-openclaw-maintainer` and `$openclaw-testing` when a rele
   main failures, report that blocker and keep independent release work moving
   instead of healing broader main.
 - Validate provider secrets before dispatching expensive full release matrices.
+- Linux (`ubuntu`) cross-OS lanes gate publication for beta, stable, and full.
+  Windows/macOS cross-OS lanes run in parallel as advisory coverage. Record
+  their actual pass/fail conclusions; failures do not block Release Decision,
+  npm publication, or `pnpm release:candidate`. Keep normal CI, npm
+  qualification, Docker, Package Acceptance, performance, and soak gates intact.
+- macOS app signing/notarization/appcast and Windows Hub asset promotion run
+  in parallel with or after npm publication and never delay npm or GitHub
+  finalization. Their own qualification and artifact gates still apply; track
+  selected platforms through verified assets and updater evidence separately.
 - Do not set GitHub secrets from unvalidated 1Password candidates. If a candidate returns 401/403, leave the existing secret alone and report the exact missing provider.
 - Use `$one-password` for secret reads/writes: one persistent tmux session, targeted items only, no secret output.
 - Watch one parent run plus compact child summaries. Avoid broad `gh run view` polling loops; REST quota is easy to burn.
@@ -105,8 +114,8 @@ Use this with `$release-openclaw-maintainer` and `$openclaw-testing` when a rele
 - Use one release operator, one transition-only watcher, and at most one
   investigator for the current failed surface. Do not build audit-review-plan
   trees around a single workflow transition.
-- For regular beta/stable releases, treat the product-complete pre-changelog
-  commit as the Code SHA. Full product validation and performance evidence bind
+- For regular beta/stable releases, treat the product-complete commit with
+  substantive version-matched draft notes as the Code SHA. Full product validation and performance evidence bind
   to that SHA. The later Release SHA may reuse those results only when it is a
   descendant whose complete changed path set is exactly `CHANGELOG.md`.
 - Extended-stable validates one exact branch tip; it does not reuse the regular
@@ -158,7 +167,7 @@ until their dependent enforcement changes land.
 - An `all` run without soak for an actual beta package on its matching canonical
   release branch or beta tag records `coveragePolicy=npm-beta-v1`. It keeps
   Linux/macOS/Windows Node, Control UI, plugin, package, install/update,
-  cross-OS, QA parity, runtime-pair/restart, and tool-coverage gates. Native app
+  Linux cross-OS, QA parity, runtime-pair/restart, and tool-coverage gates. Native app
   CI, performance, and published-package Telegram are deferred to confidence.
   Beta `all` without soak also defers Package Acceptance Telegram, including
   beta-profile checks of `main` or alpha. Record deferred checks as not run,
@@ -200,6 +209,10 @@ until their dependent enforcement changes land.
   or `performance`. Never use the removed `release-checks` handle. `qa` is
   only a direct-child manual aggregate, not a controller retry API.
 - Filtered retries fail closed unless the filter belongs to the selected group.
+  All-group runs also accept `cross_os_suite_filter`: for example,
+  `-f cross_os_suite_filter=ubuntu,macos` excludes Windows. `npm-stable-v1` and
+  `npm-beta-v1` still qualify when advisory OS lanes are omitted, provided all
+  Linux suites remain selected and the other policy requirements hold.
   Never turn an empty derived filter into an unfiltered broad run.
 - A new all-group parent is justified only when shared orchestration changed,
   earlier evidence is invalid for the selected tuple, or the operator explicitly
@@ -222,6 +235,20 @@ trusted dispatch helper. Record the target SHA with the successful production
 build, precompressed-asset verification, and startup/largest-asset budget results;
 any failure blocks fanout. Do not substitute a dev server or raise budgets to admit
 the target.
+
+For local full E2E proof, prepare the frozen, dependency-ready proof checkout
+with private QA entries in the initial build:
+
+```bash
+OPENCLAW_BUILD_PRIVATE_QA=1 pnpm build
+```
+
+Then run the selected E2E command with its normal readiness checks enabled.
+`scripts/lib/vitest-build-prerequisites.mts` requests private QA entries;
+`scripts/run-node.mts` triggers another full build when they are absent. This
+preflight avoids rebuilding solely for `missing_private_qa_dist`. Keep the flag
+scoped to this task-owned proof checkout and command. Publication package and
+image bytes remain owned by the release workflows and their sealed artifacts.
 
 Before full release validation:
 
@@ -313,7 +340,7 @@ enabled after proving the workflow commit is still on trusted `main` lineage.
 Pass `-f reuse_evidence=false` only when the operator intentionally needs a
 fresh full run.
 
-After the Code SHA is green, commit only `CHANGELOG.md` and run the same helper
+After the Code SHA is green, finalize the draft in a `CHANGELOG.md`-only commit and run the same helper
 against the Release SHA. The parent must report
 `policy=changelog-only-release-v1`, `evidenceSha=<code-sha>`, and
 `changedPaths=["CHANGELOG.md"]`; it should reuse the product matrix instead of
@@ -410,6 +437,11 @@ Interpret state precisely:
 - `cancelled_with_children`: the collector was cancelled while exact children
   remained active.
 
+Read **advisory** entries separately from Release Decision. Windows/macOS
+cross-OS lanes retain their actual conclusions in the manifest and summary;
+`passed` does not mean those advisory lanes passed. Selected lanes still need
+terminal evidence, and filtered-out lanes are not run, never passed.
+
 The `full-release-diagnostics-<run-id>-<attempt>` artifact is the terminal
 failure and timing manifest. Use it after an early blocker instead of
 restarting `all` merely to discover what the still-running children found.
@@ -477,6 +509,7 @@ Record:
 - active full parent run URL, attempt, workflow SHA, and any superseded parent
   with the exact replacement reason
 - selected child run IDs and conclusions: CI, Release Checks, Plugin Prerelease, NPM Telegram, Product Performance; record deferred confidence as not run
+- Windows/macOS cross-OS advisory lane classifications and actual conclusions
 - performance comparison result versus earlier releases when available
 - targeted local proof commands
 - provider-secret preflight result

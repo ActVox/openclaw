@@ -30,11 +30,23 @@ type GoogleManifest = {
     >;
   };
   modelCatalog?: {
+    discovery?: Record<string, string>;
     suppressions?: Array<{
       provider?: string;
       model?: string;
       reason?: string;
     }>;
+    providers?: Record<
+      string,
+      {
+        api?: string;
+        baseUrl?: string;
+        models?: Array<{
+          id?: string;
+          name?: string;
+        }>;
+      }
+    >;
   };
   configSchema?: JsonSchemaObject;
   configContracts?: {
@@ -110,6 +122,32 @@ describe("google manifest model catalog", () => {
         ],
       }),
     ]);
+  });
+
+  it("owns the canonical Google model catalog and runtime discovery declaration", () => {
+    const catalog = loadManifest().modelCatalog;
+    const provider = catalog?.providers?.google;
+    const modelIds = provider?.models?.map((model) => model.id) ?? [];
+
+    expect(catalog?.discovery?.google).toBe("runtime");
+    expect(provider).toMatchObject({
+      api: "google-generative-ai",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    });
+    expect(modelIds).toHaveLength(10);
+    expect(modelIds).not.toContain(undefined);
+    expect(new Set(modelIds).size).toBe(modelIds.length);
+  });
+
+  it("keeps legacy Google chat providers out of the canonical manifest catalog", () => {
+    const manifest = loadManifest();
+
+    // google-gemini-cli references must stay unknown-model so Doctor keeps
+    // emitting its migration hint, and neither CLI nor Vertex declares runtime
+    // discovery, so manifest rows for them would leak into runtime catalog
+    // planning. Only the canonical google provider owns manifest rows.
+    expect(manifest.modelCatalog?.providers?.["google-gemini-cli"]).toBeUndefined();
+    expect(manifest.modelCatalog?.providers?.["google-vertex"]).toBeUndefined();
   });
 
   it("offers Google AI Studio API keys without consumer CLI OAuth", () => {
@@ -210,5 +248,17 @@ describe("google manifest webSearch headers", () => {
     });
     expect(manifest.uiHints?.["webSearch.headers"]?.sensitive).not.toBe(true);
     expect(manifest.uiHints?.["webSearch.headers.*"]?.sensitive).not.toBe(true);
+  });
+});
+
+describe("google manifest image generation", () => {
+  it("accepts an explicit image generation disable flag", () => {
+    const schema = loadManifest().configSchema;
+    if (!schema) {
+      throw new Error("expected google manifest configSchema");
+    }
+    const safeParse = buildJsonPluginConfigSchema(schema).safeParse;
+    expect(safeParse?.({ imageGeneration: { enabled: false } }).success).toBe(true);
+    expect(safeParse?.({ imageGeneration: { enabled: "false" } }).success).toBe(false);
   });
 });
