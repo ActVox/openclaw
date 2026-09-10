@@ -15,6 +15,7 @@ import {
 import { createCapturedThinkingConfigStream } from "openclaw/plugin-sdk/provider-test-contracts";
 import { describe, expect, it } from "vitest";
 import { buildGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
+import { isGoogleImageGenerationEnabled } from "./index.js";
 import googleProviderDiscovery from "./provider-discovery.js";
 import { buildGoogleProvider } from "./provider-registration.js";
 
@@ -436,5 +437,16 @@ describe("google provider plugin hooks", () => {
       { id: "adaptive" },
       { id: "high" },
     ]);
+  });
+});
+
+describe("isGoogleImageGenerationEnabled", () => {
+  it("defaults to enabled for backwards compatibility", () => {
+    expect(isGoogleImageGenerationEnabled(undefined)).toBe(true);
+    expect(isGoogleImageGenerationEnabled({})).toBe(true);
+  });
+
+  it("disables only image generation when explicitly configured", () => {
+    expect(isGoogleImageGenerationEnabled({ imageGeneration: { enabled: false } })).toBe(false);
   });
 });
