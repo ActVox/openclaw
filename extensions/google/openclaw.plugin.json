@@ -989,6 +989,15 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "imageGeneration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
       "webSearch": {
         "type": "object",
         "additionalProperties": false,
