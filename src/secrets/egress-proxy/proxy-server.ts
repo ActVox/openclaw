@@ -647,6 +647,8 @@ export async function startSecretEgressProxyServer(params: {
       return {
         HTTPS_PROXY: proxyUrl,
         HTTP_PROXY: proxyUrl,
+        NO_PROXY: "localhost,127.0.0.1,::1",
+        no_proxy: "localhost,127.0.0.1,::1",
         NODE_USE_ENV_PROXY: "1",
         NODE_EXTRA_CA_CERTS: trustBundlePath,
         SSL_CERT_FILE: trustBundlePath,
