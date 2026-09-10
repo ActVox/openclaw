@@ -541,6 +541,11 @@ describe("secret egress proxy", () => {
     expect(auditEvents).toContainEqual(expect.objectContaining({ kind: "forwarded" }));
   });
 
+  it("keeps loopback traffic out of the secret egress proxy", () => {
+    expect(proxyEnv.NO_PROXY).toBe("localhost,127.0.0.1,::1");
+    expect(proxyEnv.no_proxy).toBe("localhost,127.0.0.1,::1");
+  });
+
   it("survives a client that resets a refused tunnel instead of crashing the Gateway", async () => {
     // curl resets refused CONNECT tunnels; wait for the refusal before resetting.
     const refused = await rawConnect({});
