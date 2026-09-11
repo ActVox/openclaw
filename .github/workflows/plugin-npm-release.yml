@@ -536,19 +536,11 @@ jobs:
       matrix:
         plugin: ${{ fromJson(github.event_name == 'workflow_dispatch' && inputs.preflight_only && !inputs.trusted_publisher_preflight && needs.preview_plugins_npm.outputs.all_matrix || needs.preview_plugins_npm.outputs.matrix) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.preview_plugins_npm.outputs.ref_revision }}
-          fetch-depth: 1
-
       - name: Checkout trusted packaging tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
-          path: .release-tooling
           fetch-depth: 1
 
       - name: Setup Node environment
@@ -559,11 +551,18 @@ jobs:
           install-bun: "false"
 
       - name: Install trusted plugin tooling dependencies
-        working-directory: .release-tooling
         env:
           CI: "true"
         # Corepack reads this checkout's packageManager before pnpm processes arguments.
         run: pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
+
+      - name: Checkout selected plugin source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.preview_plugins_npm.outputs.ref_revision }}
+          path: candidate
+          fetch-depth: 1
 
       - name: Prepare immutable npm preflight artifact
         id: preflight_artifact
@@ -593,13 +592,13 @@ jobs:
           pack_json="${artifact_dir}/npm-pack.json"
 
           OPENCLAW_PLUGIN_NPM_PACK_OUTPUT_DIR="${artifact_dir}" \
-            bash .release-tooling/scripts/plugin-npm-publish.sh \
-              --repo-root "$GITHUB_WORKSPACE" \
+            bash scripts/plugin-npm-publish.sh \
+              --repo-root "$GITHUB_WORKSPACE/candidate" \
               --pack "${PACKAGE_DIR}" > "${pack_output}"
 
           node --import tsx --input-type=module - "${pack_output}" "${pack_json}" <<'NODE'
           import fs from "node:fs";
-          import { resolveNpmJsonEntries } from "./.release-tooling/scripts/lib/npm-json-output.mts";
+          import { resolveNpmJsonEntries } from "./scripts/lib/npm-json-output.mts";
 
           const raw = fs.readFileSync(process.argv[2], "utf8").trim();
           let pack;
@@ -654,7 +653,7 @@ jobs:
           packed_plugin_json="${RUNNER_TEMP}/${EXTENSION_ID}-packed-plugin.json"
           tar -xOf "${tarball_path}" package/package.json > "${packed_package_json}"
           tar -xOf "${tarball_path}" package/openclaw.plugin.json > "${packed_plugin_json}"
-          source_package_json="${PACKAGE_DIR}/package.json"
+          source_package_json="${GITHUB_WORKSPACE}/candidate/${PACKAGE_DIR}/package.json"
           [[ -f "${source_package_json}" ]] || {
             echo "Source package.json is missing: ${source_package_json}." >&2
             exit 1
@@ -780,8 +779,8 @@ jobs:
           node --import tsx --input-type=module <<'NODE'
           import fs from "node:fs";
           import path from "node:path";
-          import { inspectPackageTarballBytes } from "./.release-tooling/scripts/plugin-publication-artifact.mjs";
-          import { collectPluginNpmPublishedRuntimeErrors, findPackedPackageReadmePath } from "./.release-tooling/scripts/verify-plugin-npm-published-runtime.mts";
+          import { inspectPackageTarballBytes } from "./scripts/plugin-publication-artifact.mjs";
+          import { collectPluginNpmPublishedRuntimeErrors, findPackedPackageReadmePath } from "./scripts/verify-plugin-npm-published-runtime.mts";
           const manifest = JSON.parse(fs.readFileSync(path.join(process.env.ARTIFACT_DIR, "preflight-manifest.json"), "utf8"));
           const readmes = new Map();
           const inspection = inspectPackageTarballBytes(fs.readFileSync(path.join(process.env.ARTIFACT_DIR, manifest.artifact.tarballName)), {
