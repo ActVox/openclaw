@@ -9372,36 +9372,30 @@ server.listen(0, "127.0.0.1", () => {
     }
   });
 
-  it("installs trusted plugin pack tooling before checking out the selected source", () => {
+  it("runs plugin pack setup from the trusted workflow checkout", () => {
     const workflow = parse(readFileSync(".github/workflows/plugin-npm-release.yml", "utf8"));
     const steps = workflow.jobs.preview_plugin_pack.steps as WorkflowStep[];
     const trustedCheckout = steps.findIndex(
       ({ name }) => name === "Checkout trusted packaging tooling",
     );
+    const setup = steps.findIndex(({ name }) => name === "Setup Node environment");
     const trustedInstall = steps.findIndex(
       ({ name }) => name === "Install trusted plugin tooling dependencies",
     );
-    const selectedCheckout = steps.findIndex(
-      ({ name }) => name === "Checkout selected plugin source",
-    );
 
     expect(trustedCheckout).toBeGreaterThanOrEqual(0);
-    expect(trustedInstall).toBeGreaterThan(trustedCheckout);
-    expect(selectedCheckout).toBeGreaterThan(trustedInstall);
+    expect(setup).toBeGreaterThan(trustedCheckout);
+    expect(trustedInstall).toBeGreaterThan(setup);
     expect(steps[trustedCheckout]?.with).toMatchObject({
       ref: "${{ github.workflow_sha }}",
+      path: ".release-tooling",
       "persist-credentials": false,
     });
-    expect(steps[selectedCheckout]?.with).toMatchObject({
-      ref: "${{ needs.preview_plugins_npm.outputs.ref_revision }}",
-      path: "candidate",
-      "persist-credentials": false,
-    });
+    expect(steps[setup]?.uses).toBe("./.release-tooling/.github/actions/setup-node-env");
+    expect(steps[trustedInstall]?.["working-directory"]).toBe(".release-tooling");
     const pack = steps.find(({ name }) => name === "Prepare immutable npm preflight artifact");
-    expect(pack?.run).toContain('--repo-root "$GITHUB_WORKSPACE/candidate"');
-    expect(pack?.run).toContain(
-      'source_package_json="${GITHUB_WORKSPACE}/candidate/${PACKAGE_DIR}/package.json"',
-    );
+    expect(pack?.run).toContain("bash .release-tooling/scripts/plugin-npm-publish.sh");
+    expect(pack?.run).toContain('--repo-root "$GITHUB_WORKSPACE"');
   });
 
   it("pins the Mantis Git owner and preserves distinct terminal ref-validation contracts", () => {
