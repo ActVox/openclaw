@@ -634,7 +634,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node environment
-        uses: ./.github/actions/setup-node-env
+        uses: ./.release-tooling/.github/actions/setup-node-env
         with:
           cache-mode: restore
           node-version: ${{ env.NODE_VERSION }}
