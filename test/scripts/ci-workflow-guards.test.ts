@@ -10512,6 +10512,32 @@ server.listen(0, "127.0.0.1", () => {
     }
   });
 
+  it("runs plugin pack setup from the trusted workflow checkout", () => {
+    const workflow = parse(readFileSync(".github/workflows/plugin-npm-release.yml", "utf8"));
+    const steps = workflow.jobs.preview_plugin_pack.steps as WorkflowStep[];
+    const trustedCheckout = steps.findIndex(
+      ({ name }) => name === "Checkout trusted packaging tooling",
+    );
+    const setup = steps.findIndex(({ name }) => name === "Setup Node environment");
+    const trustedInstall = steps.findIndex(
+      ({ name }) => name === "Install trusted plugin tooling dependencies",
+    );
+
+    expect(trustedCheckout).toBeGreaterThanOrEqual(0);
+    expect(setup).toBeGreaterThan(trustedCheckout);
+    expect(trustedInstall).toBeGreaterThan(setup);
+    expect(steps[trustedCheckout]?.with).toMatchObject({
+      ref: "${{ github.workflow_sha }}",
+      path: ".release-tooling",
+      "persist-credentials": false,
+    });
+    expect(steps[setup]?.uses).toBe("./.release-tooling/.github/actions/setup-node-env");
+    expect(steps[trustedInstall]?.["working-directory"]).toBe(".release-tooling");
+    const pack = steps.find(({ name }) => name === "Prepare immutable npm preflight artifact");
+    expect(pack?.run).toContain("bash .release-tooling/scripts/plugin-npm-publish.sh");
+    expect(pack?.run).toContain('--repo-root "$GITHUB_WORKSPACE"');
+  });
+
   it("pins the Mantis Git owner and preserves distinct terminal ref-validation contracts", () => {
     const action = parse(
       readFileSync(".github/actions/mantis-validate-trusted-ref/action.yml", "utf8"),
