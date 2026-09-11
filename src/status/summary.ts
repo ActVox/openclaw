@@ -41,10 +41,12 @@ import {
 } from "../secrets/runtime-degraded-state.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
+import { sortAndLimitBy } from "../shared/sort-and-limit.js";
 import {
   summarizeActionableTaskAuditFindings,
   summarizeRetainedLostTaskAuditFindings,
 } from "../tasks/task-registry.audit.js";
+import { buildTaskStatusSnapshot } from "../tasks/task-status.js";
 import { deliveryContextFromSession } from "../utils/delivery-context.shared.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import { readStatusSessionStores } from "./session-stores.js";
@@ -138,27 +140,6 @@ function compareSessionCandidatesByUpdatedAt(
   return (right.entry.updatedAt ?? 0) - (left.entry.updatedAt ?? 0);
 }
 
-function selectRecentSessionCandidates(
-  candidates: SessionEntrySummary[],
-  limit: number,
-): SessionEntrySummary[] {
-  const selected: SessionEntrySummary[] = [];
-  for (const candidate of candidates) {
-    const insertAt = selected.findIndex(
-      (selectedCandidate) => compareSessionCandidatesByUpdatedAt(candidate, selectedCandidate) < 0,
-    );
-    if (insertAt >= 0) {
-      selected.splice(insertAt, 0, candidate);
-      if (selected.length > limit) {
-        selected.pop();
-      }
-    } else if (selected.length < limit) {
-      selected.push(candidate);
-    }
-  }
-  return selected;
-}
-
 async function prepareSessionStatusDetails(cfg: OpenClawConfig, now: number) {
   const {
     classifySessionKey,
@@ -207,7 +188,6 @@ async function prepareSessionStatusDetails(cfg: OpenClawConfig, now: number) {
     modelContextCache.set(key, resolved);
     return resolved;
   };
-
   const resolved = resolveConfiguredStatusModelRef({
     cfg,
     defaultProvider: DEFAULT_PROVIDER,
@@ -487,13 +467,21 @@ export async function getStatusSummary(
   // the writable process registry or its schema-owning shared-state handle.
   const taskInspection = taskMaintenanceModule.inspectTasksReadOnly();
   const inspectableTasks = taskInspection.tasks;
-  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(inspectableTasks);
-  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const now = Date.now();
+  const taskStatusSnapshot = buildTaskStatusSnapshot(inspectableTasks, { now });
+  const rawTasks = taskMaintenanceModule.getInspectableTaskRegistrySummary(
+    taskStatusSnapshot.visible,
+  );
+  const taskAuditFindings = taskMaintenanceModule.getInspectableTaskAuditFindings(inspectableTasks);
   const taskAudit = summarizeActionableTaskAuditFindings(taskAuditFindings, { now });
   const taskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(taskAuditFindings, { now });
+  const visibleTaskIds = new Set(taskStatusSnapshot.visible.map((task) => task.taskId));
+  const visibleTaskAuditRetainedLost = summarizeRetainedLostTaskAuditFindings(
+    taskAuditFindings.filter((finding) => visibleTaskIds.has(finding.task.taskId)),
+    { now },
+  );
   const tasks: StatusSummary["tasks"] = {
-    ...discountRetainedLostTaskFailures(rawTasks, taskAuditRetainedLost.count),
+    ...discountRetainedLostTaskFailures(rawTasks, visibleTaskAuditRetainedLost.count),
     ...(taskInspection.state === "migration-required"
       ? {
           warning:
@@ -519,7 +507,11 @@ export async function getStatusSummary(
   );
   const recent = sessionDetails
     ? await sessionDetails.buildSessionRows(
-        selectRecentSessionCandidates(sessionStores.recent, RECENT_SESSION_LIMIT),
+        sortAndLimitBy(
+          sessionStores.recent,
+          RECENT_SESSION_LIMIT,
+          compareSessionCandidatesByUpdatedAt,
+        ),
       )
     : [];
   const hostDesktopStatus =
