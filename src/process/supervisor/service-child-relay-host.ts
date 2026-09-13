@@ -168,6 +168,7 @@ export async function createServiceChildRelayAdapter(
     throw new Error("service child construction aborted");
   }
   params.assertCurrent?.();
+  params.beforeSpawn?.();
   const child = spawn(process.execPath, resolveRuntimeWorkerArgv(workerUrl), {
     stdio,
     // A detached Windows Job owner survives host loss long enough to clean up.
@@ -590,6 +591,7 @@ export async function createServiceChildRelayAdapter(
     if (params.abortSignal?.aborted) {
       onConstructionAbort();
     }
+    params.beforeSpawn?.();
     await Promise.race([sendChildMessage(start), constructionAbort.promise]);
     params.assertCurrent?.();
     const [startupResult, secretDeliveryResult] = await Promise.allSettled([

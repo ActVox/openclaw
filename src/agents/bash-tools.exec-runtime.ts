@@ -640,6 +640,7 @@ export async function runExecProcess({
   startupSignal: initialStartupSignal,
   onUpdate: initialOnUpdate,
   beforeSpawn: initialBeforeSpawn,
+  assertCurrent: initialAssertCurrent,
   onSettledBeforeNotify: initialOnSettledBeforeNotify,
   ...opts
 }: {
@@ -677,6 +678,8 @@ export async function runExecProcess({
   onSettledBeforeNotify?: (outcome: ExecProcessOutcome) => void;
   /** Revalidates authorization after async preparation, immediately before each spawn attempt. */
   beforeSpawn?: () => Promise<AgentToolResult<ExecToolDetails> | undefined>;
+  /** Rechecks host policy at the supervisor's final synchronous spawn boundary. */
+  assertCurrent?: () => void;
 }): Promise<ExecProcessHandle> {
   let assertSourceActive: (() => void) | undefined =
     captureAgentToolSourceExecutionGuard(initialStartupSignal);
@@ -728,6 +731,7 @@ export async function runExecProcess({
   // Clearing the callback also releases the completed turn's captured authority.
   let onUpdate = initialOnUpdate && AsyncLocalStorage.bind(initialOnUpdate);
   let beforeSpawn = initialBeforeSpawn;
+  let assertPolicyCurrent = initialAssertCurrent;
   let onSettledBeforeNotify = initialOnSettledBeforeNotify;
 
   const emitUpdate = () => {
@@ -892,6 +896,8 @@ export async function runExecProcess({
       opts.pathPrepend,
     );
     const commandWithShellSnapshot = await maybeWrapCommandWithShellSnapshot({
+      // A bound execution plan must not load aliases/functions or replace its PATH.
+      enabled: opts.execCommand === undefined,
       command: commandWithPathPrepend,
       shell,
       shellArgs,
@@ -922,10 +928,16 @@ export async function runExecProcess({
     }
   };
   const spawn = (input: SpawnInput) => {
-    // No await between source authority validation and supervisor admission.
-    assertSourceActive?.();
+    const assertSourceCurrent = assertSourceActive;
+    const assertHostPolicyCurrent = assertPolicyCurrent;
+    const assertCurrent = () => {
+      assertSourceCurrent?.();
+    };
+    // Source authority covers construction; approval policy ends at native launch.
+    assertCurrent();
+    assertHostPolicyCurrent?.();
     return withoutGatewayToolCallerIdentity(() =>
-      supervisor.spawn({ ...input, assertCurrent: assertSourceActive }),
+      supervisor.spawn({ ...input, assertCurrent, beforeSpawn: assertHostPolicyCurrent }),
     );
   };
 
@@ -992,6 +1004,7 @@ export async function runExecProcess({
     throw error;
   } finally {
     beforeSpawn = undefined;
+    assertPolicyCurrent = undefined;
     assertSourceActive = undefined;
   }
   session.processActivity = managedRun.activity;
