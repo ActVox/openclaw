@@ -98,6 +98,15 @@ describe("check-assertion-safety-ratchet", () => {
     expect(countUnsafeAssertions(source, "src/example.ts")).toBe(1);
   });
 
+  it("accepts a SAFETY comment for an optional runtime global", () => {
+    const source = [
+      "// SAFETY: Bun exposes this optional runtime global; Node leaves it absent.",
+      "const bun = (globalThis as typeof globalThis & { Bun?: BunLike }).Bun;",
+    ].join("\n");
+
+    expect(countUnsafeAssertions(source, "src/plugins/native-module-require.ts")).toBe(0);
+  });
+
   it("blocks new debt, accepts SAFETY comments, and prunes reduced counts", () => {
     const root = tempDirs.make("openclaw-assertion-safety-");
     fs.mkdirSync(path.join(root, "config"), { recursive: true });
