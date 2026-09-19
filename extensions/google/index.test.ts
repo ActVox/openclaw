@@ -14,7 +14,7 @@ import {
 import { createCapturedThinkingConfigStream } from "openclaw/plugin-sdk/provider-test-contracts";
 import { describe, expect, it } from "vitest";
 import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
-import googlePlugin, { isGoogleImageGenerationEnabled } from "./index.js";
+import { isGoogleImageGenerationEnabled } from "./index.js";
 import googleProviderDiscovery from "./provider-discovery.js";
 import { registerGoogleProvider } from "./provider-registration.js";
 
