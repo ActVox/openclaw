@@ -520,7 +520,7 @@ describe("secret egress proxy", () => {
     expect(proxyEnv.NODE_USE_ENV_PROXY).toBe("1");
   });
 
-  it("lets Git HTTPS discovery trust the registered proxy certificate", async () => {
+  it("lets Git HTTPS discovery trust the registered certificate without proxying loopback", async () => {
     const result = await promisify(execFile)(
       "git",
       ["ls-remote", `https://localhost:${originPort}/git`, "refs/heads/main"],
@@ -540,7 +540,7 @@ describe("secret egress proxy", () => {
     );
     expect(result.stdout).toBe(`${"a".repeat(40)}\trefs/heads/main\n`);
     expect(originRequests.some((request) => request.url.startsWith("/git/info/refs"))).toBe(true);
-    expect(auditEvents).toContainEqual(expect.objectContaining({ kind: "forwarded" }));
+    expect(auditEvents).toEqual([]);
   });
 
   it("keeps loopback traffic out of the secret egress proxy", () => {
