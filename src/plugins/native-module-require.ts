@@ -116,6 +116,7 @@ export function supportsBunRuntimeOnResolveTargets(): boolean {
     return bunRuntimeOnResolveProbe.supported;
   }
   bunRuntimeOnResolveProbe.tested = true;
+  // SAFETY: Bun exposes this optional runtime global; Node leaves it absent.
   const bun = (globalThis as typeof globalThis & { Bun?: BunPluginRuntime }).Bun;
   if (!bun?.resolveSync) {
     return false;
