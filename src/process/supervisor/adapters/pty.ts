@@ -150,7 +150,7 @@ export async function createPtyAdapter(
     },
     write: (data, cb) => {
       try {
-        pty.write(typeof data === "string" ? data : data.toString("utf8"));
+        pty.write(data);
         cb?.(null);
       } catch (err) {
         cb?.(err as Error);

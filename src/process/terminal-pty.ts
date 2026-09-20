@@ -23,7 +23,7 @@ export type TerminalPtySubscription = { dispose(): void };
 
 export type TerminalPtyHandle = {
   pid: number;
-  write(data: string): void;
+  write(data: string | Buffer): void;
   resize(cols: number, rows: number): void;
   pause(): void;
   resume(): void;
