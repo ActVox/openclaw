@@ -118,7 +118,20 @@ describe("check-assertion-safety-ratchet", () => {
       "const bun = (globalThis as typeof globalThis & { Bun?: BunLike }).Bun;",
     ].join("\n");
 
-    expect(countUnsafeAssertions(source, "src/plugins/native-module-require.ts")).toBe(0);
+    expect(
+      countUnsafeAssertions(...parseFixture(source, "src/plugins/native-module-require.ts")),
+    ).toBe(0);
+  });
+
+  it("accepts a SAFETY comment for a schema-validated gateway action", () => {
+    const source = [
+      "// SAFETY: request.action has already passed the gateway action schema boundary.",
+      "const action = request.action as never;",
+    ].join("\n");
+
+    expect(
+      countUnsafeAssertions(...parseFixture(source, "src/gateway/server-methods/send.ts")),
+    ).toBe(0);
   });
 
   it("blocks new debt, accepts SAFETY comments, and prunes reduced counts", () => {
