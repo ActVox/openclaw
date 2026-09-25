@@ -995,6 +995,7 @@ export const sendHandlers: GatewayRequestHandlers = {
                 request.inboundTurnKind === "room_event" ? "room_event" : "user_request";
               const actionContext = {
                 channel,
+                // SAFETY: request.action has already passed the gateway action schema boundary.
                 action: request.action as never,
                 cfg,
                 params: request.params,
