@@ -9,6 +9,7 @@ import path from "node:path";
 export type RatchetCountDelta = { allowed: number; current: number; entry: string };
 
 const GIT_MAX_BUFFER = 256 * 1024 * 1024;
+const GIT_SOURCE_BATCH_SIZE = 128;
 const compareEntries = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
 export function parseRatchetArgs(argv: string[]) {
@@ -94,37 +95,50 @@ export function loadRatchetReference<T>(
     : null;
 }
 
-export function loadRatchetSources(root: string, filePaths: string[], ref = "") {
-  if (filePaths.length === 0) {
-    return new Map<string, string>();
+export function chunkRatchetSourcePaths(
+  filePaths: readonly string[],
+  batchSize = GIT_SOURCE_BATCH_SIZE,
+) {
+  if (!Number.isSafeInteger(batchSize) || batchSize <= 0) {
+    throw new Error("Ratchet source batch size must be a positive integer.");
   }
-  const output = execFileSync("git", ["cat-file", "--batch", "-z"], {
-    cwd: root,
-    input: filePaths.map((filePath) => ref + ":" + filePath).join("\0") + "\0",
-    maxBuffer: GIT_MAX_BUFFER,
-  });
+  const batches: string[][] = [];
+  for (let offset = 0; offset < filePaths.length; offset += batchSize) {
+    batches.push(filePaths.slice(offset, offset + batchSize));
+  }
+  return batches;
+}
+
+export function loadRatchetSources(root: string, filePaths: string[], ref = "") {
   const sources = new Map<string, string>();
-  let offset = 0;
-  // `-z` frames requests only; each response still has a newline header and payload terminator.
-  for (const filePath of filePaths) {
-    const headerEnd = output.indexOf(10, offset);
-    if (headerEnd < 0) {
-      throw new Error("Invalid git cat-file response for " + filePath);
+  for (const batch of chunkRatchetSourcePaths(filePaths)) {
+    const output = execFileSync("git", ["cat-file", "--batch", "-z"], {
+      cwd: root,
+      input: batch.map((filePath) => ref + ":" + filePath).join("\0") + "\0",
+      maxBuffer: GIT_MAX_BUFFER,
+    });
+    let offset = 0;
+    // `-z` frames requests only; each response still has a newline header and payload terminator.
+    for (const filePath of batch) {
+      const headerEnd = output.indexOf(10, offset);
+      if (headerEnd < 0) {
+        throw new Error("Invalid git cat-file response for " + filePath);
+      }
+      // Missing responses echo the requested path, whose spaces/newlines can spoof a size.
+      // Only a complete object header may frame source bytes.
+      const header = output.subarray(offset, headerEnd).toString("utf8");
+      const size = Number(/^[0-9a-f]+ (?:blob|tree|commit|tag) (\d+)$/u.exec(header)?.[1]);
+      if (!Number.isSafeInteger(size)) {
+        throw new Error("Could not read " + (ref || "staged") + " source " + filePath);
+      }
+      const sourceStart = headerEnd + 1;
+      const sourceEnd = sourceStart + size;
+      if (output[sourceEnd] !== 10) {
+        throw new Error("Invalid git cat-file framing for " + filePath);
+      }
+      sources.set(filePath, output.subarray(sourceStart, sourceEnd).toString("utf8"));
+      offset = sourceEnd + 1;
     }
-    // Missing responses echo the requested path, whose spaces/newlines can spoof a size.
-    // Only a complete object header may frame source bytes.
-    const header = output.subarray(offset, headerEnd).toString("utf8");
-    const size = Number(/^[0-9a-f]+ (?:blob|tree|commit|tag) (\d+)$/u.exec(header)?.[1]);
-    if (!Number.isSafeInteger(size)) {
-      throw new Error("Could not read " + (ref || "staged") + " source " + filePath);
-    }
-    const sourceStart = headerEnd + 1;
-    const sourceEnd = sourceStart + size;
-    if (output[sourceEnd] !== 10) {
-      throw new Error("Invalid git cat-file framing for " + filePath);
-    }
-    sources.set(filePath, output.subarray(sourceStart, sourceEnd).toString("utf8"));
-    offset = sourceEnd + 1;
   }
   return sources;
 }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  chunkRatchetSourcePaths,
   compareRatchetCounts,
   compareRatchetSets,
   loadRatchetReference,
@@ -17,6 +18,14 @@ import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 describe("shrink-ratchet", () => {
+  it("bounds Git source reads across large ratchet inputs", () => {
+    expect(chunkRatchetSourcePaths(["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], 2)).toEqual([
+      ["a.ts", "b.ts"],
+      ["c.ts", "d.ts"],
+      ["e.ts"],
+    ]);
+  });
+
   it("rejects missing paths whose names resemble successful batch headers", () => {
     const root = tempDirs.make("openclaw-shrink-ratchet-missing-");
     execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
