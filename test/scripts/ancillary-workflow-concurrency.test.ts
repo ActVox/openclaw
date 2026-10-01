@@ -82,7 +82,14 @@ type Job = {
   if?: string | boolean;
   concurrency?: Concurrency;
   outputs?: Record<string, string>;
-  steps: { id?: string; name?: string; if?: string; uses?: string; with?: { script?: string } }[];
+  steps: {
+    id?: string;
+    name?: string;
+    if?: string;
+    uses?: string;
+    "continue-on-error"?: boolean;
+    with?: { script?: string };
+  }[];
 };
 type Concurrency = { group: string; "cancel-in-progress": string | boolean };
 type Workflow = {
@@ -830,6 +837,19 @@ describe("Auto response admission", () => {
         author_association: "NONE",
       },
     },
+  });
+
+  it("skips the optional Barnacle action when neither GitHub App secret is available", () => {
+    const steps = workflow.jobs["auto-response"].steps;
+    const primary = steps.find((step) => step.id === "app-token");
+    const fallback = steps.find((step) => step.id === "app-token-fallback");
+    const runner = steps.find((step) => step.name === "Run Barnacle auto-response");
+
+    expect(primary?.["continue-on-error"]).toBe(true);
+    expect(fallback?.["continue-on-error"]).toBe(true);
+    expect(runner?.if).toBe(
+      "steps.app-token.outputs.token != '' || steps.app-token-fallback.outputs.token != ''",
+    );
   });
 
   it.each(["OWNER", "MEMBER", "COLLABORATOR"])(
