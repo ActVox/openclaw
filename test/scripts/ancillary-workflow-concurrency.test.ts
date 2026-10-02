@@ -88,7 +88,7 @@ type Job = {
     if?: string;
     uses?: string;
     "continue-on-error"?: boolean;
-    with?: { script?: string };
+    with?: Record<string, string>;
   }[];
 };
 type Concurrency = { group: string; "cancel-in-progress": string | boolean };
@@ -629,6 +629,25 @@ it("honors cancellation after a schedule-only scope job is skipped", () => {
 describe("Labeler admission", () => {
   const workflow = parse(readFileSync(".github/workflows/labeler.yml", "utf8")) as Workflow;
   const bodyChange = { body: { from: "Previous description" } };
+
+  it("falls back to the workflow token when both optional GitHub App secrets are absent", () => {
+    for (const jobName of ["label", "backfill-pr-labels", "label-issues"]) {
+      const steps = workflow.jobs[jobName]?.steps ?? [];
+      const fallback = steps.find((step) => step.id === "app-token-fallback");
+      expect(fallback?.["continue-on-error"], jobName).toBe(true);
+
+      const tokenConsumers = steps.filter(
+        (step) => step.with?.["github-token"] || step.with?.["repo-token"],
+      );
+      expect(tokenConsumers.length, jobName).toBeGreaterThan(0);
+      for (const step of tokenConsumers) {
+        const token = step.with?.["github-token"] ?? step.with?.["repo-token"];
+        expect(token, `${jobName}:${step.name ?? step.uses ?? "unknown"}`).toContain(
+          "github.token",
+        );
+      }
+    }
+  });
 
   function event(
     runId: number,
