@@ -39,6 +39,7 @@ type ScriptIo = {
 
 const DEFAULT_BASE_REF = "origin/main";
 const DEFAULT_HEAD_REF = "HEAD";
+const DIFF_PATH_CHUNK_SIZE = 200;
 const TEMP_DIR_HELPER_PATH = "test/helpers/temp-dir.ts";
 const TEMP_DIR_HELPER_TEST_PATH = "test/helpers/temp-dir.test.ts";
 const MANUAL_TEMP_DIR_HELPERS = new Set(["cleanupTempDirs", "createTempDirTracker", "makeTempDir"]);
@@ -210,7 +211,20 @@ function readDiff(args: ReturnType<typeof parseArgs>, cwd = process.cwd()): stri
       paths.add(to);
     }
   }
-  return paths.size > 0 ? readGitDiff("--unified=0", "--", ...paths) : "";
+  if (paths.size === 0) {
+    return "";
+  }
+  const selectedPaths = [...paths];
+  const patches: string[] = [];
+  // A release-sized branch can change enough test files for one patch to exceed
+  // execFileSync's bounded buffer. Keep each Git invocation bounded while still
+  // selecting paths before patch generation.
+  for (let index = 0; index < selectedPaths.length; index += DIFF_PATH_CHUNK_SIZE) {
+    patches.push(
+      readGitDiff("--unified=0", "--", ...selectedPaths.slice(index, index + DIFF_PATH_CHUNK_SIZE)),
+    );
+  }
+  return patches.join("\n");
 }
 
 function readSourceForDiff(

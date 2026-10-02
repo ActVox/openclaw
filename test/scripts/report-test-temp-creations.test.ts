@@ -365,7 +365,13 @@ describe("report-test-temp-creations", () => {
     const file = "src/case[1].test.ts";
     const source = ["const root = fs.", "mkdtemp", 'Sync("case-");'].join("");
     fs.writeFileSync(path.join(root, file), `${source}\n`);
-    git("--literal-pathspecs", "add", "--", file);
+    for (let index = 0; index < 200; index += 1) {
+      fs.writeFileSync(
+        path.join(root, `src/chunk-${index}.test.ts`),
+        `export const value = ${index};\n`,
+      );
+    }
+    git("add", "src");
     const expected = [{ file, line: 1, reason: "new mkdtemp temp directory creation", source }];
     expect(jsonReport("--staged")).toEqual(expected);
     git("commit", "-q", "-m", "generated data and test");

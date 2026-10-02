@@ -840,7 +840,7 @@ describe("Auto response admission", () => {
   });
 
   it("skips the optional Barnacle action when neither GitHub App secret is available", () => {
-    const steps = workflow.jobs["auto-response"].steps;
+    const steps = workflow.jobs["auto-response"]?.steps ?? [];
     const primary = steps.find((step) => step.id === "app-token");
     const fallback = steps.find((step) => step.id === "app-token-fallback");
     const runner = steps.find((step) => step.name === "Run Barnacle auto-response");
