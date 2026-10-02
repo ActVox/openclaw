@@ -2926,6 +2926,12 @@ AFTER_CD
     expect(workflow.jobs["checks-fast-channel-contracts-shard"].strategy["max-parallel"]).toBe(12);
     expect(workflow.jobs["check-shard"].strategy["max-parallel"]).toBe(12);
     expect(workflow.jobs["check-additional-shard"].strategy["max-parallel"]).toBe(12);
+    expect(workflow.jobs["check-additional-shard"]["timeout-minutes"]).toBe(
+      "${{ matrix.timeout_minutes || 20 }}",
+    );
+    expect(readFileSync(".github/workflows/ci.yml", "utf8")).toContain(
+      '{ check_name: "check-additional-extension-package-boundary", group: "extension-package-boundary", runner: "blacksmith-32vcpu-ubuntu-2404", timeout_minutes: 30 }',
+    );
     expect(workflow.jobs["checks-windows"].strategy["max-parallel"]).toBe(5);
     expect(workflow.jobs["checks-ui-e2e-real-gateway"].strategy["max-parallel"]).toBe(2);
     for (const [context, expected] of [
