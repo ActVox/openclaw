@@ -878,7 +878,9 @@ esac
         expect(exhausted.recoveryError).toContain(JSON.stringify(entry));
         expect(await processState(entry.pid)).toMatch(/^T/u);
       }
-      await expect(quiescence.resume()).rejects.toThrow(exhausted.recoveryError);
+      await expect(quiescence.resume()).rejects.toThrow(
+        "workspace quiescence recovery exhausted after 4 probe passes",
+      );
       await fs.unlink(stallPath);
       await quiescence.resume();
       await expect(fs.stat(leaseFile)).rejects.toThrow();
