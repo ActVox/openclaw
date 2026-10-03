@@ -1543,6 +1543,27 @@ AFTER_CD
     });
   });
 
+  it("keeps the ARM gate runnable in downstream forks without Blacksmith runners", () => {
+    const workflow = readWorkflow(".github/workflows/ci-check-arm-testbox.yml");
+    const job = workflow.jobs["check-arm"];
+
+    expect(evaluateWorkflowRunner(job["runs-on"], { repository: "openclaw/openclaw" })).toBe(
+      "blacksmith-16vcpu-ubuntu-2404-arm",
+    );
+    expect(evaluateWorkflowRunner(job["runs-on"], { repository: "ActVox/openclaw" })).toBe(
+      "ubuntu-24.04-arm",
+    );
+
+    const beginStep = job.steps.find((step: WorkflowStep) => step.name === "Begin Testbox");
+    const runStep = job.steps.find((step: WorkflowStep) => step.name === "Run Testbox");
+    expect(beginStep?.if).toBe(
+      "github.event_name == 'workflow_dispatch' && github.repository == 'openclaw/openclaw'",
+    );
+    expect(runStep?.if).toBe(
+      "github.event_name == 'workflow_dispatch' && github.repository == 'openclaw/openclaw' && always()",
+    );
+  });
+
   it("keeps every path-filtered hosted gate runnable on landing-relevant events", () => {
     const workflows = [
       [".github/workflows/ci-check-testbox.yml", "check"],
