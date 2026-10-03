@@ -1,8 +1,9 @@
 import { constants } from "node:fs";
 import { access as fsAccess, readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
+import { readRegularFile } from "@openclaw/fs-safe/advanced";
+import { classifyAttachmentBytes } from "@openclaw/media-core/attachment-classify";
 import { hasErrnoCode, toErrorObject } from "../../../infra/errors.js";
-import { readRegularFile } from "../../../infra/regular-file.js";
 import { decodeWindowsTextFileBuffer } from "../../../infra/windows-encoding.js";
 import type { ImageContent, TextContent } from "../../../llm/types.js";
 import {
@@ -43,11 +44,7 @@ import {
 } from "./path-utils.js";
 import { decodeReadableTextBuffer } from "./read-content-guard.js";
 import { createBoundedReadTextPage } from "./read-page.js";
-import {
-  createReadToolDetails,
-  readToolInputSchema,
-  readToolOutputSchema,
-} from "./read-tool-contract.js";
+import { createReadToolDetails } from "./read-tool-contract.js";
 import {
   getTextOutput,
   invalidArgText,
@@ -59,6 +56,7 @@ import {
 } from "./render-utils.js";
 import type { ReadToolDetails } from "./tool-contracts.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+import { readToolInputSchema, readToolOutputSchema } from "./tool-schemas.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "./truncate.js";
 
 function normalizeReadError(error: unknown, filePath: string): Error {
@@ -388,20 +386,12 @@ export function createReadToolDefinition(
     parameters: readToolInputSchema,
     outputSchema: readToolOutputSchema,
     async execute(
-      toolCallId,
-      {
-        path,
-        offset,
-        limit,
-        cursor = 0,
-        optional,
-      }: { path: string; offset?: number; limit?: number; cursor?: number; optional?: true },
-      signal?: AbortSignal,
-      onUpdate?,
-      ctx?,
+      _toolCallId,
+      { path, offset, limit, cursor = 0, optional },
+      signal,
+      _onUpdate,
+      ctx,
     ) {
-      void toolCallId;
-      void onUpdate;
       if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 1)) {
         throw new Error("Offset must be an integer at least 1");
       }
@@ -482,6 +472,7 @@ export function createReadToolDefinition(
               return;
             }
             const mimeType = await detectReadImageMimeType(ops, buffer, absolutePath);
+            const attachment = mimeType ? undefined : await classifyAttachmentBytes({ buffer });
             let content: (TextContent | ImageContent)[];
             let textDetails: Parameters<typeof createReadToolDetails>[1];
             const modelHasVision = options?.modelHasVision ?? ctx?.model?.input.includes("image");
@@ -489,7 +480,14 @@ export function createReadToolDefinition(
               modelHasVision === false
                 ? "[Current model does not support images. The image will be omitted from this request.]"
                 : undefined;
-            if (mimeType) {
+            if (attachment?.class === "document") {
+              content = [
+                {
+                  type: "text",
+                  text: `Read did not return file contents because it detected a binary document [${attachment.mime ?? "unknown"}]. Use an available document parser or converter, or convert the file to text, Markdown, or CSV, then read the converted file.`,
+                },
+              ];
+            } else if (mimeType) {
               // Backends may reuse their Buffer while image preparation awaits processing.
               const imageBytes = Buffer.from(buffer);
               const processed = await processImage(
