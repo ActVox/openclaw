@@ -3,7 +3,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+import * as ts from "typescript/unstable/ast";
 import { isChangedLaneTestPath } from "./changed-lanes.mts";
 import {
   booleanFlag,
@@ -11,12 +11,8 @@ import {
   parseFlagArgs,
   stringFlag,
 } from "./lib/arg-utils.mts";
+import { createNativeTypeScriptParser } from "./lib/native-typescript.mts";
 import { runAsScript } from "./lib/ts-guard-utils.mts";
-
-type AddedLine = {
-  line: number;
-  source: string;
-};
 
 type TempCreationFinding = {
   file: string;
@@ -43,6 +39,7 @@ type ScriptIo = {
 
 const DEFAULT_BASE_REF = "origin/main";
 const DEFAULT_HEAD_REF = "HEAD";
+const DIFF_PATH_CHUNK_SIZE = 200;
 const TEMP_DIR_HELPER_PATH = "test/helpers/temp-dir.ts";
 const TEMP_DIR_HELPER_TEST_PATH = "test/helpers/temp-dir.test.ts";
 const MANUAL_TEMP_DIR_HELPERS = new Set(["cleanupTempDirs", "createTempDirTracker", "makeTempDir"]);
@@ -102,7 +99,11 @@ function shouldInspectFile(filePath: string): boolean {
 
 function shouldInspectManualHelperUsage(filePath: string): boolean {
   const normalizedPath = normalizePath(filePath);
-  return normalizedPath !== TEMP_DIR_HELPER_TEST_PATH && shouldInspectFile(normalizedPath);
+  return (
+    /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(normalizedPath) &&
+    normalizedPath !== TEMP_DIR_HELPER_TEST_PATH &&
+    shouldInspectFile(normalizedPath)
+  );
 }
 
 function escapeGithubCommandValue(value: unknown): string {
@@ -210,28 +211,20 @@ function readDiff(args: ReturnType<typeof parseArgs>, cwd = process.cwd()): stri
       paths.add(to);
     }
   }
-  return paths.size > 0 ? readGitDiff("--unified=0", "--", ...paths) : "";
-}
-
-function readWorktreeSource(filePath: string, cwd: string): string {
-  try {
-    return fs.readFileSync(path.join(cwd, filePath), "utf8");
-  } catch {
+  if (paths.size === 0) {
     return "";
   }
-}
-
-function readStagedSource(filePath: string, cwd: string): string {
-  try {
-    return execFileSync("git", ["show", `:${filePath}`], {
-      cwd,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch {
-    return "";
+  const selectedPaths = [...paths];
+  const patches: string[] = [];
+  // A release-sized branch can change enough test files for one patch to exceed
+  // execFileSync's bounded buffer. Keep each Git invocation bounded while still
+  // selecting paths before patch generation.
+  for (let index = 0; index < selectedPaths.length; index += DIFF_PATH_CHUNK_SIZE) {
+    patches.push(
+      readGitDiff("--unified=0", "--", ...selectedPaths.slice(index, index + DIFF_PATH_CHUNK_SIZE)),
+    );
   }
+  return patches.join("\n");
 }
 
 function readSourceForDiff(
@@ -241,7 +234,18 @@ function readSourceForDiff(
 ): string {
   // Staged checks must parse the index blob. Reading the worktree mixes in
   // unstaged edits and can warn on code that will not be committed.
-  return args.staged ? readStagedSource(filePath, cwd) : readWorktreeSource(filePath, cwd);
+  try {
+    return args.staged
+      ? execFileSync("git", ["show", `:${filePath}`], {
+          cwd,
+          encoding: "utf8",
+          maxBuffer: 64 * 1024 * 1024,
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+      : fs.readFileSync(path.join(cwd, filePath), "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function stripKnownExtension(filePath: string): string {
@@ -254,10 +258,6 @@ function isTempDirHelperImportSpec(filePath: string, specifier: string): boolean
     ? path.posix.normalize(path.posix.join(path.posix.dirname(filePath), normalizedSpecifier))
     : normalizedSpecifier;
   return stripKnownExtension(resolvedPath) === stripKnownExtension(TEMP_DIR_HELPER_PATH);
-}
-
-function createSourceFile(filePath: string, sourceText: string): ts.SourceFile {
-  return ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true);
 }
 
 function lineForNode(sourceFile: ts.SourceFile, node: ts.Node): number {
@@ -355,11 +355,9 @@ function collectManualTempDirHelperImports(
 
 function findManualHelperUsageFindings(
   filePath: string,
-  sourceText: string,
-  addedLines: AddedLine[],
+  sourceFile: ts.SourceFile,
+  addedLineNumbers: Set<number>,
 ): TempCreationFinding[] {
-  const addedLineNumbers = new Set(addedLines.map((line) => line.line));
-  const sourceFile = createSourceFile(filePath, sourceText);
   const { imports, localNames } = collectManualTempDirHelperImports(
     sourceFile,
     filePath,
@@ -388,54 +386,10 @@ function findManualHelperUsageFindings(
         source: sourceLineText(sourceFile, lineForNode(sourceFile, node.expression)),
       });
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
   visit(sourceFile);
   return findings;
-}
-
-function collectAddedLinesByFile(diffText: string): Map<string, AddedLine[]> {
-  const addedLinesByFile = new Map<string, AddedLine[]>();
-  let currentFile: string | null = null;
-  let currentLine = 0;
-
-  for (const line of diffText.split(/\r?\n/u)) {
-    const fileMatch = line.match(/^\+\+\+ b\/(.+)$/u);
-    if (fileMatch) {
-      const filePath = fileMatch[1];
-      if (!filePath) {
-        continue;
-      }
-      currentFile = normalizePath(filePath);
-      continue;
-    }
-    if (line === "+++ /dev/null") {
-      currentFile = null;
-      continue;
-    }
-
-    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
-    if (hunkMatch) {
-      currentLine = Number.parseInt(hunkMatch[1] ?? "0", 10);
-      continue;
-    }
-
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      if (currentFile && shouldInspectFile(currentFile)) {
-        const lines = addedLinesByFile.get(currentFile) ?? [];
-        lines.push({ line: currentLine, source: line.slice(1) });
-        addedLinesByFile.set(currentFile, lines);
-      }
-      currentLine += 1;
-      continue;
-    }
-
-    if (line.startsWith(" ") || line === "") {
-      currentLine += 1;
-    }
-  }
-
-  return addedLinesByFile;
 }
 
 export function collectTempCreationFindingsFromDiff(
@@ -445,15 +399,14 @@ export function collectTempCreationFindingsFromDiff(
     readFile?: (filePath: string) => string | null | undefined;
   } = {},
 ): TempCreationFinding[] {
-  const diff = diffText;
   const findings: TempCreationFinding[] = [];
-  const addedLinesByFile = collectAddedLinesByFile(diff);
+  const addedLinesByFile = new Map<string, Set<number>>();
   const fileTextByPath = normalizeFileTextMap(options.fileTextByPath);
   let currentFile: string | null = null;
   let currentLine = 0;
   let allowNextLine: AllowNextLine | null = null;
 
-  for (const line of diff.split(/\r?\n/u)) {
+  for (const line of diffText.split(/\r?\n/u)) {
     const fileMatch = line.match(/^\+\+\+ b\/(.+)$/u);
     if (fileMatch) {
       const filePath = fileMatch[1];
@@ -480,6 +433,9 @@ export function collectTempCreationFindingsFromDiff(
     if (line.startsWith("+") && !line.startsWith("+++")) {
       if (currentFile && shouldInspectFile(currentFile)) {
         const source = line.slice(1);
+        const lines = addedLinesByFile.get(currentFile) ?? new Set<number>();
+        lines.add(currentLine);
+        addedLinesByFile.set(currentFile, lines);
         const allowed =
           hasTempDirAllowMarker(source) ||
           (allowNextLine?.file === currentFile && allowNextLine.line === currentLine);
@@ -510,15 +466,21 @@ export function collectTempCreationFindingsFromDiff(
     }
   }
 
-  for (const [file, addedLines] of addedLinesByFile) {
-    if (!shouldInspectManualHelperUsage(file)) {
-      continue;
+  const parser = createNativeTypeScriptParser();
+  try {
+    for (const [file, addedLines] of addedLinesByFile) {
+      if (!shouldInspectManualHelperUsage(file)) {
+        continue;
+      }
+      const sourceText = readCurrentSource(file, options, fileTextByPath);
+      if (!sourceText) {
+        continue;
+      }
+      const sourceFile = parser.parseSourceFile(file, sourceText);
+      findings.push(...findManualHelperUsageFindings(file, sourceFile, addedLines));
     }
-    const sourceText = readCurrentSource(file, options, fileTextByPath);
-    if (!sourceText) {
-      continue;
-    }
-    findings.push(...findManualHelperUsageFindings(file, sourceText, addedLines));
+  } finally {
+    parser.close();
   }
 
   return findings;

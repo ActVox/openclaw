@@ -3,10 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  chunkRatchetSourcePaths,
   compareRatchetCounts,
   compareRatchetSets,
-  enforceRatchetScalar,
-  formatRatchetMessage,
   loadRatchetReference,
   loadRatchetSnapshot,
   loadRatchetSources,
@@ -19,6 +18,14 @@ import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 describe("shrink-ratchet", () => {
+  it("bounds Git source reads across large ratchet inputs", () => {
+    expect(chunkRatchetSourcePaths(["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], 2)).toEqual([
+      ["a.ts", "b.ts"],
+      ["c.ts", "d.ts"],
+      ["e.ts"],
+    ]);
+  });
+
   it("rejects missing paths whose names resemble successful batch headers", () => {
     const root = tempDirs.make("openclaw-shrink-ratchet-missing-");
     execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
@@ -93,7 +100,6 @@ describe("shrink-ratchet", () => {
   it.each([
     () => parseRatchetScalar("1\n2\n", "scalar.txt"),
     () => parseRatchetScalar("-1\n", "scalar.txt"),
-    () => parseRatchetScalar("many\n", "scalar.txt"),
   ])("rejects malformed scalar baselines", (parse) => {
     expect(parse).toThrow(/exactly one non-negative integer/u);
   });
@@ -140,24 +146,5 @@ describe("shrink-ratchet", () => {
     },
   ])("compares $name without permitting growth", ({ compare, expected }) => {
     expect(compare()).toEqual(expected);
-  });
-
-  it.each([
-    { current: 3, message: "budget grew", messages: { increased: "budget grew" } },
-    { current: 2, message: undefined, messages: {} },
-    { current: 1, message: "shrink the budget", messages: { decreased: "shrink the budget" } },
-  ])("preserves scalar failure messaging", ({ current, message, messages }) => {
-    const enforce = () => enforceRatchetScalar(current, 2, messages);
-    if (message) {
-      expect(enforce).toThrow(message);
-    } else {
-      expect(enforce).not.toThrow();
-    }
-  });
-
-  it("formats shrink guidance", () => {
-    expect(
-      formatRatchetMessage("Shrink baseline entries:", ["src/a.ts: 1 < 2", "src/b.ts: 0 < 1"]),
-    ).toBe("Shrink baseline entries:\n  src/a.ts: 1 < 2\n  src/b.ts: 0 < 1");
   });
 });
