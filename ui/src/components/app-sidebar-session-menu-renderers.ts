@@ -413,6 +413,7 @@ export function renderSidebarSessionSortMenu(params: {
                     id="sidebar-sessions-reset"
                     class="sidebar-session-menu-reset"
                     @click=${(event: Event) => {
+                      // SAFETY: Lit invokes this handler with the bound reset button as currentTarget.
                       (event.currentTarget as HTMLElement)
                         .closest(".sidebar-session-filter-panel")
                         ?.querySelector<HTMLElement>(
@@ -511,7 +512,10 @@ export function renderSidebarSessionSortMenu(params: {
                       : []),
                     { value: "none", label: t("sessionsView.groupByNone") },
                   ],
-                  onChange: (value) => params.onGroupingChange(value as SidebarSessionsGrouping),
+                  onChange: (value) => {
+                    // SAFETY: renderPicker returns only the SidebarSessionsGrouping options above.
+                    params.onGroupingChange(value as SidebarSessionsGrouping);
+                  },
                 })
           }
           ${renderPicker({

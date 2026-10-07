@@ -13,6 +13,7 @@ import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const parser = createNativeTypeScriptParser();
 afterAll(() => parser.close());
+const repoRoot = path.resolve(import.meta.dirname, "../..");
 
 function parseFixture(source: string, fileName: string) {
   return [source, fileName, parser.parseSourceFile(fileName, source), parser] as const;
@@ -132,6 +133,13 @@ describe("check-assertion-safety-ratchet", () => {
     expect(
       countUnsafeAssertions(...parseFixture(source, "src/gateway/server-methods/send.ts")),
     ).toBe(0);
+  });
+
+  it("keeps sidebar session menu assertions within grandfathered debt", () => {
+    const fileName = "ui/src/components/app-sidebar-session-menu-renderers.ts";
+    const source = fs.readFileSync(path.join(repoRoot, fileName), "utf8");
+
+    expect(countUnsafeAssertions(...parseFixture(source, fileName))).toBe(1);
   });
 
   it("blocks new debt, accepts SAFETY comments, and prunes reduced counts", () => {
