@@ -524,6 +524,59 @@ describe("captureCodexSettledTurnFinalizationContext", () => {
     expect(JSON.stringify(context).length).toBeLessThan(1024);
   });
 
+  it("captures a settled turn after visible transcript-only records", async () => {
+    const settledMessages = settledTurn();
+    const context = await captureContext({
+      historyMessages: [
+        message(
+          {
+            role: "bashExecution",
+            command: "printf fixture",
+            output: "fixture output",
+            exitCode: 0,
+            cancelled: false,
+            truncated: false,
+            timestamp: 1,
+          },
+          "prior:bash",
+        ),
+        message(
+          {
+            role: "compactionSummary",
+            summary: "Earlier fixture context.",
+            tokensBefore: 10,
+            timestamp: "2026-01-01T00:00:00.000Z",
+          },
+          "prior:summary",
+        ),
+        ...settledMessages,
+      ],
+      mirroredMessages: settledMessages,
+      settledMessages,
+    });
+
+    expect(context?.data).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Ran `printf fixture`\n```\nfixture output\n```" }],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "The conversation history before this point was compacted into the following summary:\n\n<summary>\nEarlier fixture context.\n</summary>",
+          },
+        ],
+      },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Send it." }] },
+      { type: "function_call", call_id: "call-2", name: "message", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-2", output: "sent" },
+    ]);
+  });
+
   it("rejects a read failure after the complete prefix instead of accepting partial verification", async () => {
     const settledMessages = settledTurn();
     mocks.readHistory.mockImplementation(

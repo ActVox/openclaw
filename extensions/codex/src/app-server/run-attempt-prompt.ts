@@ -18,11 +18,11 @@ import {
   CODEX_TURN_START_TEXT_INPUT_MAX_CHARS,
   fitCodexProjectedContextForTurnStart,
   CodexContextAttachmentError,
-  isCodexDurableCustomMessage,
   projectContextEngineAssemblyForCodex,
   type CodexProjectedImageGroup,
   type CodexProjectedContextRange,
 } from "./context-engine-projection.js";
+import { isCodexDurableCustomMessage } from "./custom-message-filter.js";
 import { flattenCodexDynamicToolFunctions } from "./protocol.js";
 import type { CodexAttemptContext } from "./run-attempt-context.js";
 import { estimateCodexAppServerProjectedTurnTokens } from "./run-attempt-lifecycle.js";

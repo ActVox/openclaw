@@ -3,13 +3,13 @@ import { IMAGE_BLOCK_TOKENS } from "openclaw/plugin-sdk/agent-core";
  * Projects OpenClaw context-engine assemblies into Codex prompt text while
  * preserving safety boundaries and redacting tool payloads.
  */
-import {
-  isOpenClawRuntimeContextCustomMessage,
-  type AgentMessage,
-} from "openclaw/plugin-sdk/agent-harness-runtime";
+import type { AgentMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { ImageContent } from "openclaw/plugin-sdk/llm";
 import { redactSensitiveFieldValue, redactToolPayloadText } from "openclaw/plugin-sdk/logging-core";
 import { sliceUtf16Safe, truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { isCodexDurableCustomMessage } from "./custom-message-filter.js";
+
+export { isCodexDurableCustomMessage } from "./custom-message-filter.js";
 
 type CodexContextProjection = {
   developerInstructionAddition?: string;
@@ -101,15 +101,6 @@ export function neutralizeCodexExplicitMentionSigils(text: string): string {
   return text
     .replace(/\$(?=[A-Za-z0-9_:-])/gu, "＄")
     .replace(/\[@(?=[A-Za-z0-9_:-]+\]\s*\()/gu, "[＠");
-}
-
-/** Hidden durable notes are context; transient runtime carriers are current-turn only. */
-export function isCodexDurableCustomMessage(message: AgentMessage): boolean {
-  return (
-    message.role === "custom" &&
-    message.excludeFromContext !== true &&
-    !isOpenClawRuntimeContextCustomMessage(message)
-  );
 }
 
 /** Projects assembled OpenClaw context-engine messages into Codex prompt inputs. */

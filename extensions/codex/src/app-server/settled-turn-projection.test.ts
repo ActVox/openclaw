@@ -332,6 +332,182 @@ describe("projectSettledCodexMessages", () => {
     expect(() => projectSettledCodexMessages(messages)).toThrowError(CodexHistoryRejection);
   });
 
+  it("skips transient runtime-context custom messages without losing settled tool evidence", () => {
+    expect(
+      projectSettledCodexMessages([
+        message({
+          role: "custom",
+          customType: "openclaw.runtime-context",
+          display: false,
+          content: "Internal runtime context that must not become replay history.",
+          timestamp: 1,
+        }),
+        toolCall(),
+        toolResult(),
+      ]),
+    ).toEqual([
+      expect.objectContaining({ type: "function_call", call_id: "call-1" }),
+      { type: "function_call_output", call_id: "call-1", output: "Message sent." },
+    ]);
+  });
+
+  it("serializes durable custom text as replay input", () => {
+    expect(
+      projectSettledCodexMessages([
+        message({
+          role: "custom",
+          customType: "plugin.note",
+          display: false,
+          content: "Durable note for finalization.",
+          timestamp: 1,
+        }),
+        toolCall(),
+        toolResult(),
+      ]),
+    ).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Durable note for finalization." }],
+      },
+      expect.objectContaining({ type: "function_call", call_id: "call-1" }),
+      { type: "function_call_output", call_id: "call-1", output: "Message sent." },
+    ]);
+  });
+
+  it.each([
+    {
+      name: "unknown role",
+      value: { role: "future-role", content: "unknown" },
+      reason: "unsupported_content",
+    },
+    {
+      name: "custom image evidence",
+      value: {
+        role: "custom",
+        customType: "plugin.note",
+        display: false,
+        content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+      },
+      reason: "unsupported_user_image",
+    },
+    {
+      name: "unknown custom block",
+      value: {
+        role: "custom",
+        customType: "plugin.note",
+        display: false,
+        content: [{ type: "future-block" }],
+      },
+      reason: "unsupported_content",
+    },
+  ])(
+    "rejects $name instead of silently dropping it during custom-message conversion",
+    ({ value, reason }) => {
+      expect(() => projectSettledCodexMessages([message(value), toolCall(), toolResult()])).toThrow(
+        expect.objectContaining({ reason }),
+      );
+    },
+  );
+
+  it("serializes visible built-in transcript records", () => {
+    expect(
+      projectSettledCodexMessages([
+        message({
+          role: "bashExecution",
+          command: "printf fixture",
+          output: "fixture output",
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          timestamp: 1,
+        }),
+        message({
+          role: "branchSummary",
+          summary: "Returned from the fixture branch.",
+          fromId: "branch-1",
+          timestamp: 2,
+        }),
+        message({
+          role: "compactionSummary",
+          summary: "Earlier fixture context.",
+          tokensBefore: 10,
+          timestamp: 3,
+        }),
+        toolCall(),
+        toolResult(),
+      ]),
+    ).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Ran `printf fixture`\n```\nfixture output\n```" }],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "The following is a summary of a branch that this conversation came back from:\n\n<summary>\nReturned from the fixture branch.</summary>",
+          },
+        ],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "The conversation history before this point was compacted into the following summary:\n\n<summary>\nEarlier fixture context.\n</summary>",
+          },
+        ],
+      },
+      expect.objectContaining({ type: "function_call", call_id: "call-1" }),
+      { type: "function_call_output", call_id: "call-1", output: "Message sent." },
+    ]);
+  });
+
+  it("skips an explicitly excluded shell transcript", () => {
+    expect(
+      projectSettledCodexMessages([
+        message({
+          role: "bashExecution",
+          command: "printf hidden",
+          output: "private output",
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          excludeFromContext: true,
+          timestamp: 1,
+        }),
+        toolCall(),
+        toolResult(),
+      ]),
+    ).toEqual([
+      expect.objectContaining({ type: "function_call", call_id: "call-1" }),
+      { type: "function_call_output", call_id: "call-1", output: "Message sent." },
+    ]);
+  });
+
+  it("keeps shell transcript text within the field budget", () => {
+    expect(() =>
+      projectSettledCodexMessages([
+        message({
+          role: "bashExecution",
+          command: "printf fixture",
+          output: "x".repeat(64 * 1024),
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          timestamp: 1,
+        }),
+        toolCall(),
+        toolResult(),
+      ]),
+    ).toThrow("field_limit");
+  });
+
   it("preserves valid image tool results as bounded non-vision evidence", () => {
     expect(
       projectSettledCodexMessages([

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isCodexDurableCustomMessage } from "./custom-message-filter.js";
 import { CodexHistoryRejection } from "./history-rejection.js";
 import type { JsonValue } from "./protocol.js";
 import { readUpstreamUserText } from "./upstream-prompt-provenance.js";
@@ -267,6 +268,73 @@ function projectToolResult(
   projection.appendItem({ type: "function_call_output", call_id: id, output });
 }
 
+function projectBashExecution(
+  message: Extract<AgentMessage, { role: "bashExecution" }>,
+  projection: HistoryProjection,
+): void {
+  if (message.excludeFromContext === true) {
+    return;
+  }
+  if (
+    typeof message.command !== "string" ||
+    typeof message.output !== "string" ||
+    typeof message.cancelled !== "boolean" ||
+    typeof message.truncated !== "boolean" ||
+    (message.exitCode !== undefined &&
+      message.exitCode !== null &&
+      (!Number.isInteger(message.exitCode) || !Number.isFinite(message.exitCode))) ||
+    (message.fullOutputPath !== undefined && typeof message.fullOutputPath !== "string")
+  ) {
+    throw new CodexHistoryRejection("invalid_content");
+  }
+  let text = `Ran \`${message.command}\`\n`;
+  text += message.output ? `\`\`\`\n${message.output}\n\`\`\`` : "(no output)";
+  if (message.cancelled) {
+    text += "\n\n(command cancelled)";
+  } else if (
+    message.exitCode !== null &&
+    message.exitCode !== undefined &&
+    message.exitCode !== 0
+  ) {
+    text += `\n\nCommand exited with code ${message.exitCode}`;
+  }
+  if (message.truncated && message.fullOutputPath) {
+    text += `\n\n[Output truncated. Full output: ${message.fullOutputPath}]`;
+  }
+  projectUserMessage({ role: "user", content: text, timestamp: message.timestamp }, projection);
+}
+
+function projectSummary(
+  message: Extract<AgentMessage, { role: "branchSummary" | "compactionSummary" }>,
+  projection: HistoryProjection,
+): void {
+  if (typeof message.summary !== "string") {
+    throw new CodexHistoryRejection("invalid_content");
+  }
+  const text =
+    message.role === "branchSummary"
+      ? `The following is a summary of a branch that this conversation came back from:\n\n<summary>\n${message.summary}</summary>`
+      : `The conversation history before this point was compacted into the following summary:\n\n<summary>\n${message.summary}\n</summary>`;
+  projectUserMessage(
+    {
+      role: "user",
+      content: text,
+      timestamp: typeof message.timestamp === "number" ? message.timestamp : 0,
+    },
+    projection,
+  );
+}
+
+function startsProjectedUserGroup(message: AgentMessage): boolean {
+  return (
+    message.role === "user" ||
+    (message.role === "bashExecution" && message.excludeFromContext !== true) ||
+    (message.role === "custom" && isCodexDurableCustomMessage(message)) ||
+    message.role === "branchSummary" ||
+    message.role === "compactionSummary"
+  );
+}
+
 class HistoryProjection {
   readonly items: JsonValue[] = [];
   readonly pending = new Map<string, string>();
@@ -286,6 +354,22 @@ class HistoryProjection {
       projectAssistantMessage(message, this);
     } else if (message.role === "toolResult") {
       projectToolResult(message, this);
+    } else if (message.role === "bashExecution") {
+      projectBashExecution(message, this);
+    } else if (message.role === "custom") {
+      if (!isCodexDurableCustomMessage(message)) {
+        return;
+      }
+      // Durable custom records use the same string-or-text/image content shape
+      // as user messages. Preserve them as user replay input rather than
+      // discarding valid saved context; the user projection keeps its strict
+      // content and budget validation.
+      projectUserMessage(
+        { role: "user", content: message.content, timestamp: message.timestamp },
+        this,
+      );
+    } else if (message.role === "branchSummary" || message.role === "compactionSummary") {
+      projectSummary(message, this);
     } else {
       throw new CodexHistoryRejection("unsupported_content");
     }
@@ -384,7 +468,7 @@ export class SettledTurnPriorContext {
 
   append(message: AgentMessage): void {
     // A user message while a tool is in flight steers the same atomic group.
-    if (message.role === "user" && this.active.pending.size === 0) {
+    if (startsProjectedUserGroup(message) && this.active.pending.size === 0) {
       this.finishGroup();
       this.active = new HistoryProjection(this.seenCallIds, "omit");
     }
