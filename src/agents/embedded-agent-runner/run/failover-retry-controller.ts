@@ -15,6 +15,7 @@ import {
 } from "../../failover-error.js";
 import { hasLongWindowRateLimitEvidence } from "../../failover/retry-evidence.js";
 import { isConfigBackedInlineProviderApiKey, type ResolvedProviderAuth } from "../../model-auth.js";
+import type { ModelFallbackNetworkRetryBudget } from "../../model-fallback-attempt.js";
 import { log } from "../logger.js";
 import type { TraceAttempt } from "../types.js";
 import { resolveAuthProfileFailureReason } from "./auth-profile-failure-policy.js";
@@ -80,6 +81,8 @@ export function createEmbeddedRunFailoverRetryController(input: {
   globalLane: string;
   agentDir: string;
   fallbackConfigured: boolean;
+  /** Shared by the outer model fallback loop for DNS/connect outage retries. */
+  networkRetryBudget?: ModelFallbackNetworkRetryBudget;
   profileFailureStore: PreparedRuntime["profileFailureStore"];
   getLastProfileId: () => string | undefined;
   getSessionId: () => string;
@@ -257,6 +260,8 @@ export function createEmbeddedRunFailoverRetryController(input: {
       maxRetryDelayMs?: number;
       /** False when the attempt cannot fail over (replay-unsafe tool activity). */
       failoverEligible?: boolean;
+      /** True only for DNS/connect endpoint failures, not generic timeouts. */
+      networkError?: boolean;
       onRetry?: (status: {
         attempt: number;
         maxRetries: number;
@@ -330,11 +335,21 @@ export function createEmbeddedRunFailoverRetryController(input: {
         return false;
       }
       rateLimitSeen ||= rateLimit;
-      const retryCount = transientRetryCount;
-      const retryBudget = Math.min(
+      const networkRetryBudget = retry.networkError ? input.networkRetryBudget : undefined;
+      const localRetryBudget = Math.min(
         transientRetryBudget ?? (rateLimit ? MAX_RATE_LIMIT_ATTEMPTS - 1 : MAX_TRANSIENT_RETRIES),
         rateLimitSeen ? MAX_RATE_LIMIT_ATTEMPTS - 1 : Infinity,
       );
+      if (networkRetryBudget) {
+        networkRetryBudget.maxRetries = Math.min(
+          networkRetryBudget.maxRetries ?? localRetryBudget,
+          localRetryBudget,
+        );
+      }
+      // DNS/connect failures are endpoint-wide. Share only that retry budget
+      // across fallback candidates; rate-limit and auth policy remain local.
+      const retryCount = networkRetryBudget?.retries ?? transientRetryCount;
+      const retryBudget = networkRetryBudget?.maxRetries ?? localRetryBudget;
       if (retryCount >= retryBudget) {
         recordDecision("rejected", "retry_budget_exhausted");
         return false;
@@ -388,6 +403,9 @@ export function createEmbeddedRunFailoverRetryController(input: {
       }
       recordDecision("accepted", "backoff_completed");
       transientRetryCount += 1;
+      if (networkRetryBudget) {
+        networkRetryBudget.retries += 1;
+      }
       return true;
     },
   };

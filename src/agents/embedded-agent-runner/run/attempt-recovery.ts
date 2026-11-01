@@ -1,4 +1,5 @@
 import { isResponsesOutputLimitToolCallError } from "@openclaw/ai/diagnostics";
+import { isTransientNetworkError } from "../../../../packages/ai/src/utils/retryable-network-errors.js";
 import { emitAgentEvent } from "../../../infra/agent-events.js";
 import { emitDiagnosticsTimelineEvent } from "../../../infra/diagnostics-timeline.js";
 import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
@@ -394,6 +395,8 @@ export async function recoverEmbeddedRunAttempt(input: {
       // Fallback and rotation both require a replay-safe attempt; without one the
       // only recovery left is to wait out the floor and continue the transcript.
       failoverEligible: currentAttemptReplaySafe,
+      // Transport codes survive provider wrapping even when classification calls it timeout.
+      networkError: isTransientNetworkError(promptError ?? assistantSignal),
       onRetry: async ({ attempt: retryAttempt, maxRetries, delayMs, reason }) => {
         const event = {
           stream: "run_status",

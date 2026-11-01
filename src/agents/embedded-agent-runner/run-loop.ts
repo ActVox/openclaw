@@ -227,6 +227,7 @@ export async function runPreparedEmbeddedLoop(
     globalLane,
     agentDir,
     fallbackConfigured,
+    networkRetryBudget: params.networkRetryBudget,
     profileFailureStore,
     getLastProfileId: () => preparedRuntime.snapshot().lastProfileId,
     getSessionId: () => sessionPromptState.sessionId,

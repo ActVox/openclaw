@@ -67,9 +67,17 @@ export function isFallbackSummaryError(err: unknown): err is FallbackSummaryErro
   );
 }
 
+/** Shared across one logical fallback chain; endpoint outages must not restart per model. */
+export type ModelFallbackNetworkRetryBudget = {
+  retries: number;
+  maxRetries?: number;
+};
+
 export type ModelFallbackRunOptions = {
   allowTransientCooldownProbe?: boolean;
   isFinalFallbackAttempt?: boolean;
+  /** Retry budget carried across candidates for DNS/connect endpoint failures only. */
+  networkRetryBudget?: ModelFallbackNetworkRetryBudget;
   modelRoutingProvenance: ModelFallbackAttemptProvenance;
 };
 

@@ -99,6 +99,19 @@ const outputLimitScenario = {
 } satisfies TransportDropScenario;
 
 describe("recoverEmbeddedRunAttempt", () => {
+  it.each(["ENOTFOUND", "ECONNREFUSED"])(
+    "classifies assistant-only %s for the shared network budget",
+    async (errorCode) => {
+      const fixture = await recoverAfterTransportDrop({
+        errorCode,
+        errorMessage: `provider failed: ${errorCode}`,
+        noTools: true,
+      });
+      const retry = vi.spyOn(fixture.failoverRetryController, "maybeRetryTransient");
+      await fixture.recover();
+      expect(retry).toHaveBeenCalledWith(expect.objectContaining({ networkError: true }));
+    },
+  );
   it.each([
     { retryAvailable: true, decision: "accepted", reason: "transient_retry" },
     { retryAvailable: false, decision: "rejected", reason: "replay_unsafe" },

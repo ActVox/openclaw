@@ -41,6 +41,7 @@ const observedModelRoutingProvenance: Array<{
   stage: "initial" | "fallback";
   fallbackReason?: string;
 }> = [];
+const observedNetworkBudgets: unknown[] = [];
 const suspendSessionMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const { computeBackoffMock, sleepWithAbortMock } = vi.hoisted(() => ({
   computeBackoffMock: vi.fn(
@@ -111,6 +112,7 @@ beforeAll(async () => {
 beforeEach(() => {
   resetFallbackSkipCacheForTest();
   observedModelRoutingProvenance.length = 0;
+  observedNetworkBudgets.length = 0;
   runEmbeddedAttemptMock.mockReset();
   suspendSessionMock.mockClear();
   computeBackoffMock.mockClear();
@@ -212,6 +214,7 @@ async function runEmbeddedEntryFallback(params: {
       onFallbackStep: params.onFallbackStep,
       runCandidate: (provider, model, options) => {
         observedModelRoutingProvenance.push(options.modelRoutingProvenance);
+        observedNetworkBudgets.push(options.networkRetryBudget);
         return runEmbeddedAgentWithPreparedAdmission({
           preparedRunAdmission,
           sessionId,
@@ -226,6 +229,7 @@ async function runEmbeddedEntryFallback(params: {
           provider,
           model,
           modelRoutingProvenance: options.modelRoutingProvenance,
+          networkRetryBudget: options.networkRetryBudget,
           authProfileIdSource: "auto",
           isFinalFallbackAttempt: options.isFinalFallbackAttempt,
           timeoutMs: 5_000,
@@ -375,6 +379,37 @@ function expectProviderAttemptCounts(expected: { openai: number; groq: number })
 }
 
 describe("runWithModelFallback + runEmbeddedAgent failover behavior", () => {
+  it("shares one classified network retry budget through the embedded entrypoint", async () => {
+    await withModelFallbackWorkspace(async ({ agentDir, workspaceDir }) => {
+      await writeFallbackAuthStore(agentDir);
+      runEmbeddedAttemptMock.mockImplementation(async (params: unknown) => {
+        const attempt = params as EmbeddedAttemptParams;
+        return makeEmbeddedRunnerAttempt({
+          providerRetryMaxRetries: 1,
+          assistantTexts: [],
+          lastAssistant: buildEmbeddedRunnerAssistant({
+            provider: attempt.provider,
+            model: attempt.modelId ?? "mock-1",
+            stopReason: "error",
+            errorCode: "ENOTFOUND",
+            errorMessage: "getaddrinfo ENOTFOUND provider.invalid",
+          }),
+        });
+      });
+      await expect(
+        runEmbeddedEntryFallback({
+          agentDir,
+          workspaceDir,
+          sessionKey: "agent:test:shared-network-budget",
+          runId: "run:shared-network-budget",
+        }),
+      ).rejects.toThrow();
+      expect(observedNetworkBudgets).toHaveLength(2);
+      expect(observedNetworkBudgets[0]).toBeDefined();
+      expect(observedNetworkBudgets[0]).toBe(observedNetworkBudgets[1]);
+      expectProviderAttemptCounts({ openai: 2, groq: 1 });
+    });
+  });
   it("keeps a pinned model on its rate-limit surface instead of escalating to fallback", async () => {
     await withModelFallbackWorkspace(async ({ agentDir, workspaceDir }) => {
       await writeFallbackMultiProfileAuthStore(agentDir);

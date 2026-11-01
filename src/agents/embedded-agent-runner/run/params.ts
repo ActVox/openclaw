@@ -42,6 +42,7 @@ import type { ExecSessionDefaults } from "../../exec-defaults.js";
 import type { ExpectedAgentHarnessRuntimeArtifact } from "../../harness/runtime-artifact.types.js";
 import type { AgentInternalEvent } from "../../internal-events.js";
 import type { PreparedModelThinkingCapability } from "../../model-catalog-lookup.js";
+import type { ModelFallbackNetworkRetryBudget } from "../../model-fallback-attempt.js";
 import type { ReplyDeliveryObserver, ReplyExpectation } from "../../reply-completion.js";
 import type { AgentRunSessionTarget } from "../../run-session-target.types.js";
 import type { EmbeddedRunTrigger } from "../../run-trigger.js";
@@ -176,6 +177,8 @@ export type RunEmbeddedAgentParams = {
   modelThinkingCapability?: PreparedModelThinkingCapability;
   /** Effective model fallback chain for this session attempt. Undefined uses config defaults. */
   modelFallbacksOverride?: string[];
+  /** Shared retry budget supplied by the outer fallback chain for endpoint outages. */
+  networkRetryBudget?: ModelFallbackNetworkRetryBudget;
   /** Prepared fallback availability fact shared by selection and failure reporting. */
   modelFallbackAvailability?: ModelFallbackAvailability;
   /** Session-pinned embedded harness id. Prevents runtime hot-switching. */

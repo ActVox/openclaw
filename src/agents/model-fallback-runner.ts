@@ -178,6 +178,10 @@ async function runWithModelFallbackInternal<T>(
       })
     : null;
   const attempts: FallbackAttempt[] = [];
+  // Endpoint failures (DNS/connect) are shared by every model candidate in one
+  // logical request. The embedded retry controller spends this state only for
+  // proven network failures; auth and rate-limit handling remain candidate-local.
+  const networkRetryBudget = { retries: 0 };
   const profileIdsByCandidate = new Map<ModelFallbackCandidate, string[]>();
   let lastError: unknown;
   let latestClassifiedResult: ModelFallbackClassifiedResult<T> | undefined;
@@ -480,16 +484,22 @@ async function runWithModelFallbackInternal<T>(
       ...candidate,
       attempts,
       captureHarnessPreflight: true,
-      options: {
-        ...runOptions,
-        isFinalFallbackAttempt: !hasRemainingCandidate,
-        modelRoutingProvenance: {
-          requestedProvider: params.provider,
-          requestedModel: params.model,
-          stage: isPrimary ? "initial" : "fallback",
-          fallbackReason: isPrimary ? undefined : attempts.at(-1)?.reason,
-        },
-      },
+      options: (() => {
+        const options: ModelFallbackRunOptions = {
+          ...runOptions,
+          isFinalFallbackAttempt: !hasRemainingCandidate,
+          modelRoutingProvenance: {
+            requestedProvider: params.provider,
+            requestedModel: params.model,
+            stage: isPrimary ? "initial" : "fallback",
+            fallbackReason: isPrimary ? undefined : attempts.at(-1)?.reason,
+          },
+        };
+        // Keep the chain state internal to fallback execution. Non-enumerability
+        // preserves the public options shape observed by external run callbacks.
+        Object.defineProperty(options, "networkRetryBudget", { value: networkRetryBudget });
+        return options;
+      })(),
       // Keep the lane available while the outer loop still has another candidate.
       deferSessionSuspension: hasRemainingCandidate,
       onDeferredSessionSuspension: (suspension) => {

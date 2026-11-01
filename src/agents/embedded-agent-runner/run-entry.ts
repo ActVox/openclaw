@@ -26,7 +26,10 @@ import {
 import { resolveAgentHarnessPolicy } from "../harness/policy.js";
 import { ensureSelectedAgentHarnessPlugin } from "../harness/runtime-plugin.js";
 import { selectAgentHarness } from "../harness/selection.js";
-import type { ModelFallbackResultClassification } from "../model-fallback-attempt.js";
+import type {
+  ModelFallbackNetworkRetryBudget,
+  ModelFallbackResultClassification,
+} from "../model-fallback-attempt.js";
 import type { ModelFallbackStepFields } from "../model-fallback-observation.js";
 import { runWithModelFallback } from "../model-fallback-runner.js";
 import type {
@@ -74,6 +77,7 @@ type RunEntryCandidateOptions = {
   classifyResult: (result: EmbeddedAgentRunResult) => ModelFallbackResultClassification;
   allowTransientCooldownProbe?: boolean;
   isFinalFallbackAttempt?: boolean;
+  networkRetryBudget?: ModelFallbackNetworkRetryBudget;
   isFallbackRetry: boolean;
   modelRoutingProvenance: ModelFallbackAttemptProvenance;
   contextEngineLogicalTurnLease: ContextEngineLogicalTurnLease;
@@ -430,6 +434,7 @@ async function runEmbeddedAgentEntryInternal<T extends EmbeddedAgentRunResult>(
               classifyResult,
               allowTransientCooldownProbe: options.allowTransientCooldownProbe,
               isFinalFallbackAttempt: options.isFinalFallbackAttempt,
+              networkRetryBudget: options.networkRetryBudget,
               isFallbackRetry,
               modelRoutingProvenance: runOptions.forceFallbackRetry
                 ? {

@@ -80,7 +80,10 @@ import type { ContextEngineLogicalTurnLease } from "../harness/context-engine-lo
 import type { ContextEngineTurnAttemptFacts } from "../harness/context-engine-turn-attempt.js";
 import { resolveAvailableAgentHarnessPolicy } from "../harness/selection.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
-import type { ModelFallbackResultClassification } from "../model-fallback-attempt.js";
+import type {
+  ModelFallbackNetworkRetryBudget,
+  ModelFallbackResultClassification,
+} from "../model-fallback-attempt.js";
 import type { ModelFallbackAttemptProvenance } from "../model-fallback.types.js";
 import { resolveCliRuntimeExecutionProvider } from "../model-runtime-aliases.js";
 import { isCliProvider } from "../model-selection.js";
@@ -244,6 +247,7 @@ export function runAgentAttempt(params: {
   classifyResult?: (result: EmbeddedAgentRunResult) => ModelFallbackResultClassification;
   modelRoutingProvenance: ModelFallbackAttemptProvenance;
   resolvedThinkLevel: ThinkLevel;
+  networkRetryBudget?: ModelFallbackNetworkRetryBudget;
   fastMode?: FastMode;
   fastModeStartedAtMs?: number;
   fastModeAutoOnSeconds?: number;
@@ -1026,6 +1030,7 @@ export function runAgentAttempt(params: {
     requestedRouteResolution: "resolved",
     modelThinkingCapability: params.modelThinkingCapability,
     modelFallbacksOverride: params.modelFallbacksOverride,
+    networkRetryBudget: params.networkRetryBudget,
     authProfileId,
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     isFinalFallbackAttempt: params.isFinalFallbackAttempt,
